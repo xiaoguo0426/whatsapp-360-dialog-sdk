@@ -1,0 +1,44 @@
+{
+  "name": "onetech/whatsapp-360-dialog-sdk",
+  "description": "PHP SDK for 360 Dialog WhatsApp Business API",
+  "type": "library",
+  "license": "MIT",
+  "authors": [
+	{
+	  "name": "xiaoguo0426",
+	  "email": "xiaoguo0426@gmail.com"
+	}
+  ],
+  "require": {
+	"php": ">=8.2",
+	"ext-json": "*",
+	"guzzlehttp/guzzle": "^7.0"
+  },
+  "require-dev": {
+	"phpunit/phpunit": "^9.0",
+	"mockery/mockery": "^1.4",
+	"phpstan/phpstan": "^1.0",
+	"vlucas/phpdotenv": "^5.0"
+  },
+  "autoload": {
+	"psr-4": {
+	  "Dialog360\\": "src/"
+	}
+  },
+  "autoload-dev": {
+	"psr-4": {
+	  "Dialog360\\Tests\\": "tests/"
+	}
+  },
+  "scripts": {
+	"test": "phpunit",
+	"test-coverage": "phpunit --coverage-html coverage",
+	"phpstan": "phpstan analyse src tests"
+  },
+  "config": {
+	"sort-packages": true,
+	"optimize-autoloader": true
+  },
+  "minimum-stability": "stable",
+  "prefer-stable": true
+} 
