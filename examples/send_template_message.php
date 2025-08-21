@@ -12,7 +12,7 @@ EnvironmentLoader::load();
 // 从环境变量获取配置
 $apiKey = EnvironmentLoader::get('DIALOG360_API_KEY', 'your-api-key');
 $phoneNumberId = EnvironmentLoader::get('DIALOG360_PHONE_NUMBER_ID', 'your-phone-number-id');
-$baseUrl = EnvironmentLoader::get('DIALOG360_BASE_URL', 'https://waba-api.360dialog.io');
+$baseUrl = EnvironmentLoader::get('DIALOG360_BASE_URL', 'https://waba-v2.360dialog.io');
 $timeout = (int)EnvironmentLoader::get('DIALOG360_TIMEOUT', 30);
 $retryAttempts = (int)EnvironmentLoader::get('DIALOG360_RETRY_ATTEMPTS', 3);
 
@@ -91,12 +91,7 @@ try {
         echo "错误: " . $response->getErrorMessage() . "\n";
     }
 
-    // 获取可用的模板
-    $templates = $client->getTemplates();
-    echo "📋 可用的模板:\n";
-    foreach ($templates['data'] ?? [] as $template) {
-        echo "- " . $template['name'] . " (" . $template['language'] . ")\n";
-    }
+    // Cloud API 暂不支持通过 Messaging API 列出模板，请在 Hub 或 Graph API 查看
 
 } catch (Exception $e) {
     echo "❌ 发生错误: " . $e->getMessage() . "\n";

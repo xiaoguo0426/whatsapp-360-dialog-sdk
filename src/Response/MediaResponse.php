@@ -14,11 +14,13 @@ class MediaResponse
     public function __construct(array $data)
     {
         $this->data = $data;
+        // Cloud API v2 媒体响应结构
         $this->mediaId = $data['id'] ?? '';
         $this->url = $data['url'] ?? '';
         $this->mimeType = $data['mime_type'] ?? '';
         $this->sha256 = $data['sha256'] ?? '';
-        $this->fileSize = $data['file_size'] ?? 0;
+        // Cloud API 返回字符串格式的 file_size
+        $this->fileSize = (int)($data['file_size'] ?? 0);
     }
 
     /**

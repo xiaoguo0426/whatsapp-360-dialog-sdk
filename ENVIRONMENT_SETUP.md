@@ -14,7 +14,7 @@
 # 360 Dialog API 配置
 DIALOG360_API_KEY=your-api-key-here
 DIALOG360_PHONE_NUMBER_ID=your-phone-number-id-here
-DIALOG360_BASE_URL=https://waba-api.360dialog.io
+DIALOG360_BASE_URL=https://waba-v2.360dialog.io
 
 # 应用环境
 APP_ENV=development

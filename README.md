@@ -1,14 +1,16 @@
-# 360 Dialog PHP SDK
+# 360 Dialog PHP SDK (Cloud API v2)
 
-一个用于360 Dialog WhatsApp Business API的PHP SDK包。
+一个用于360 Dialog WhatsApp Business API Cloud API v2的PHP SDK包。
+
+> **⚠️ 重要更新**: 本 SDK 已升级到 Cloud API v2。如果您从 v1 (On-Premise API) 迁移，请查看 [迁移指南](MIGRATION_V1_TO_V2.md)。
 
 ## 安装
 
 ```bash
-composer require 360-dialog/php-sdk
+composer require onetech/whatsapp-360-dialog-sdk
 ```
 
-## 快速开始
+## 快速开始（Cloud API v2）
 
 ```php
 <?php
@@ -33,6 +35,9 @@ $response = $client->sendMessage($message);
 // 检查响应
 if ($response->isSuccess()) {
     echo "消息发送成功！";
+    // Cloud API 可查询健康状态（替代 v1 的消息状态查询）
+    $health = $client->getHealthStatus();
+    echo "健康状态: " . ($health['health_status']['can_send_message'] ?? 'UNKNOWN');
 } else {
     echo "发送失败: " . $response->getErrorMessage();
 }
@@ -44,7 +49,7 @@ if ($response->isSuccess()) {
 - ✅ 发送媒体消息（图片、音频、视频、文档）
 - ✅ 发送模板消息
 - ✅ 发送交互式消息（按钮、列表）
-- ✅ 获取消息状态
+- ✅ 健康检查（Cloud API）
 - ✅ 获取媒体文件
 - ✅ 错误处理和重试机制
 - ✅ 完整的类型提示
@@ -60,7 +65,7 @@ if ($response->isSuccess()) {
 # 360 Dialog API 配置
 DIALOG360_API_KEY=your-api-key
 DIALOG360_PHONE_NUMBER_ID=your-phone-number-id
-DIALOG360_BASE_URL=https://waba-api.360dialog.io
+DIALOG360_BASE_URL=https://waba-v2.360dialog.io
 
 # 应用环境
 APP_ENV=development
@@ -79,7 +84,7 @@ EnvironmentLoader::load();
 $client = new Dialog360Client(
     apiKey: EnvironmentLoader::get('DIALOG360_API_KEY'),
     phoneNumberId: EnvironmentLoader::get('DIALOG360_PHONE_NUMBER_ID'),
-    baseUrl: EnvironmentLoader::get('DIALOG360_BASE_URL', 'https://waba-api.360dialog.io'),
+    baseUrl: EnvironmentLoader::get('DIALOG360_BASE_URL', 'https://waba-v2.360dialog.io'),
     timeout: (int) EnvironmentLoader::get('DIALOG360_TIMEOUT', 30),
     retryAttempts: (int) EnvironmentLoader::get('DIALOG360_RETRY_ATTEMPTS', 3)
 );
@@ -215,13 +220,11 @@ $listMessage = new InteractiveMessage(
 );
 ```
 
-## 获取消息状态
+## 健康状态（Cloud API）
 
 ```php
-use Dialog360\MessageStatus;
-
-$status = $client->getMessageStatus('message-id');
-echo $status->getStatus(); // sent, delivered, read, failed
+$health = $client->getHealthStatus();
+echo $health['health_status']['can_send_message'] ?? 'UNKNOWN';
 ```
 
 ## 获取媒体文件
@@ -265,6 +268,15 @@ composer test-coverage
 # 运行静态分析
 composer phpstan
 ```
+
+## 迁移支持
+
+如果您从 v1 (On-Premise API) 迁移到 v2 (Cloud API)：
+
+1. 📖 阅读 [迁移指南](MIGRATION_V1_TO_V2.md)
+2. 🔄 更新基础 URL 到 `https://waba-v2.360dialog.io`
+3. 🔑 确保使用最新的 API 密钥
+4. 🧪 运行测试验证配置
 
 ## 贡献
 

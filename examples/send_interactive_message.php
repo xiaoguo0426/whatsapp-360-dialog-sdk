@@ -12,7 +12,7 @@ EnvironmentLoader::load();
 // 从环境变量获取配置
 $apiKey = EnvironmentLoader::get('DIALOG360_API_KEY', 'your-api-key');
 $phoneNumberId = EnvironmentLoader::get('DIALOG360_PHONE_NUMBER_ID', 'your-phone-number-id');
-$baseUrl = EnvironmentLoader::get('DIALOG360_BASE_URL', 'https://waba-api.360dialog.io');
+$baseUrl = EnvironmentLoader::get('DIALOG360_BASE_URL', 'https://waba-v2.360dialog.io');
 $timeout = (int)EnvironmentLoader::get('DIALOG360_TIMEOUT', 30);
 $retryAttempts = (int)EnvironmentLoader::get('DIALOG360_RETRY_ATTEMPTS', 3);
 

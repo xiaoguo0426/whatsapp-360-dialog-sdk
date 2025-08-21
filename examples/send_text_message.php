@@ -12,7 +12,7 @@ EnvironmentLoader::load();
 // 从环境变量获取配置
 $apiKey = EnvironmentLoader::get('DIALOG360_API_KEY', 'your-api-key');
 $phoneNumberId = EnvironmentLoader::get('DIALOG360_PHONE_NUMBER_ID', 'your-phone-number-id');
-$baseUrl = EnvironmentLoader::get('DIALOG360_BASE_URL', 'https://waba-api.360dialog.io');
+$baseUrl = EnvironmentLoader::get('DIALOG360_BASE_URL', 'https://waba-v2.360dialog.io');
 $timeout = (int)EnvironmentLoader::get('DIALOG360_TIMEOUT', 30);
 $retryAttempts = (int)EnvironmentLoader::get('DIALOG360_RETRY_ATTEMPTS', 3);
 
@@ -35,9 +35,9 @@ try {
         echo "✅ 消息发送成功！\n";
         echo "消息ID: " . $response->getMessageId() . "\n";
         
-        // 获取消息状态
-        $status = $client->getMessageStatus($response->getMessageId());
-        echo "消息状态: " . $status->getStatus() . "\n";
+        // 获取健康状态（Cloud API）
+        $health = $client->getHealthStatus();
+        echo "健康状态: " . ($health['health_status']['can_send_message'] ?? 'UNKNOWN') . "\n";
     } else {
         echo "❌ 发送失败！\n";
         echo "错误代码: " . $response->getErrorCode() . "\n";

@@ -2,7 +2,7 @@
 
 namespace Dialog360\Response;
 
-class MessageStatusResponse
+class SetWebhookUrlResponse
 {
     private array $data;
     private string $messageId;

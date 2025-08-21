@@ -37,7 +37,7 @@ composer install
 ```bash
 DIALOG360_API_KEY=your-api-key-here
 DIALOG360_PHONE_NUMBER_ID=your-phone-number-id-here
-DIALOG360_BASE_URL=https://waba-api.360dialog.io
+DIALOG360_BASE_URL=https://waba-v2.360dialog.io
 ```
 
 ### 获取 API 密钥
@@ -122,7 +122,7 @@ composer phpstan
 $client = new Dialog360Client(
     $apiKey,
     $phoneNumberId,
-    'https://waba-api.360dialog.io',
+    'https://waba-v2.360dialog.io',
     30, // timeout
     3   // retry attempts
 );
