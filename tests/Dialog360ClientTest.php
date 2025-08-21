@@ -25,22 +25,31 @@ class Dialog360ClientTest extends TestCase
     {
         $this->mockHandler = new MockHandler();
         $handlerStack = HandlerStack::create($this->mockHandler);
-        
+
         $this->client = new Dialog360Client(
             'test-api-key',
             'test-phone-number-id',
-            'https://waba-api.360dialog.io',
+            'https://waba-v2.360dialog.io',
             30,
-            3
+            3,
+            $handlerStack
         );
     }
 
     public function testSendTextMessageSuccess(): void
     {
+        // Cloud API v2 响应结构
         $this->mockHandler->append(
             new Response(200, [], json_encode([
+                'messaging_product' => 'whatsapp',
+                'contacts' => [
+                    [
+                        'input' => '1234567890',
+                        'wa_id' => '1234567890'
+                    ]
+                ],
                 'messages' => [
-                    ['id' => 'test-message-id']
+                    ['id' => 'wamid.test-message-id']
                 ]
             ]))
         );
@@ -49,7 +58,7 @@ class Dialog360ClientTest extends TestCase
         $response = $this->client->sendMessage($message);
 
         $this->assertTrue($response->isSuccess());
-        $this->assertEquals('test-message-id', $response->getMessageId());
+        $this->assertEquals('wamid.test-message-id', $response->getMessageId());
     }
 
     public function testSendTextMessageFailure(): void
@@ -77,8 +86,15 @@ class Dialog360ClientTest extends TestCase
     {
         $this->mockHandler->append(
             new Response(200, [], json_encode([
+                'messaging_product' => 'whatsapp',
+                'contacts' => [
+                    [
+                        'input' => '1234567890',
+                        'wa_id' => '1234567890'
+                    ]
+                ],
                 'messages' => [
-                    ['id' => 'test-media-message-id']
+                    ['id' => 'wamid.test-media-message-id']
                 ]
             ]))
         );
@@ -87,15 +103,22 @@ class Dialog360ClientTest extends TestCase
         $response = $this->client->sendMessage($message);
 
         $this->assertTrue($response->isSuccess());
-        $this->assertEquals('test-media-message-id', $response->getMessageId());
+        $this->assertEquals('wamid.test-media-message-id', $response->getMessageId());
     }
 
     public function testSendTemplateMessage(): void
     {
         $this->mockHandler->append(
             new Response(200, [], json_encode([
+                'messaging_product' => 'whatsapp',
+                'contacts' => [
+                    [
+                        'input' => '1234567890',
+                        'wa_id' => '1234567890'
+                    ]
+                ],
                 'messages' => [
-                    ['id' => 'test-template-message-id']
+                    ['id' => 'wamid.test-template-message-id']
                 ]
             ]))
         );
@@ -125,8 +148,15 @@ class Dialog360ClientTest extends TestCase
     {
         $this->mockHandler->append(
             new Response(200, [], json_encode([
+                'messaging_product' => 'whatsapp',
+                'contacts' => [
+                    [
+                        'input' => '1234567890',
+                        'wa_id' => '1234567890'
+                    ]
+                ],
                 'messages' => [
-                    ['id' => 'test-interactive-message-id']
+                    ['id' => 'wamid.test-interactive-message-id']
                 ]
             ]))
         );
@@ -149,47 +179,61 @@ class Dialog360ClientTest extends TestCase
         $this->assertTrue($response->isSuccess());
     }
 
-    public function testGetMessageStatus(): void
+    public function testGetHealthStatus(): void
     {
         $this->mockHandler->append(
             new Response(200, [], json_encode([
-                'id' => 'test-message-id',
-                'status' => 'delivered',
-                'timestamp' => '2023-01-01T12:00:00Z'
+                'health_status' => [
+                    'can_send_message' => 'AVAILABLE',
+                    'entities' => [
+                        [
+                            'entity_type' => 'PHONE_NUMBER',
+                            'id' => '106540352242922',
+                            'can_send_message' => 'AVAILABLE'
+                        ],
+                        [
+                            'entity_type' => 'WABA',
+                            'id' => '102290129340398',
+                            'can_send_message' => 'AVAILABLE'
+                        ]
+                    ]
+                ],
+                'id' => '106540352242922'
             ]))
         );
 
-        $status = $this->client->getMessageStatus('test-message-id');
-        
-        $this->assertEquals('test-message-id', $status->getMessageId());
-        $this->assertEquals('delivered', $status->getStatus());
-        $this->assertTrue($status->isDelivered());
+        $health = $this->client->getHealthStatus();
+        $this->assertEquals('AVAILABLE', $health['health_status']['can_send_message']);
+        $this->assertCount(2, $health['health_status']['entities']);
     }
 
     public function testGetMediaInfo(): void
     {
+        // Cloud API v2 媒体响应结构
         $this->mockHandler->append(
             new Response(200, [], json_encode([
+                'messaging_product' => 'whatsapp',
                 'id' => 'test-media-id',
-                'url' => 'https://example.com/media.jpg',
+                'url' => 'https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=130345565692730173924&ext=1664537344507&hash=ATtBt0Cdio',
                 'mime_type' => 'image/jpeg',
                 'sha256' => 'test-sha256',
-                'file_size' => 1024
+                'file_size' => '1024'
             ]))
         );
 
         $media = $this->client->getMediaInfo('test-media-id');
         
         $this->assertEquals('test-media-id', $media->getMediaId());
-        $this->assertEquals('https://example.com/media.jpg', $media->getUrl());
+        $this->assertStringContainsString('lookaside.fbsbx.com', $media->getUrl());
         $this->assertEquals('image/jpeg', $media->getMimeType());
+        $this->assertEquals(1024, $media->getFileSize());
         $this->assertTrue($media->isImage());
     }
 
     public function testNetworkError(): void
     {
         $this->mockHandler->append(
-            new RequestException('Network error', new Request('POST', '/v1/messages'))
+            new RequestException('Network error', new Request('POST', '/messages'))
         );
 
         $message = new TextMessage('1234567890', 'Hello World!');
@@ -206,8 +250,17 @@ class Dialog360ClientTest extends TestCase
         
         $this->assertEquals('test-api-key', $config['apiKey']);
         $this->assertEquals('test-phone-number-id', $config['phoneNumberId']);
-        $this->assertEquals('https://waba-api.360dialog.io', $config['baseUrl']);
+        $this->assertEquals('https://waba-v2.360dialog.io', $config['baseUrl']);
         $this->assertEquals(30, $config['timeout']);
         $this->assertEquals(3, $config['retryAttempts']);
+    }
+
+    public function testUnsupportedMethods(): void
+    {
+        // 测试不再支持的方法抛出异常
+        $this->expectException(Dialog360Exception::class);
+        $this->expectExceptionMessage('Cloud API 暂不支持通过 Messaging API 获取电话号码信息');
+        
+        $this->client->getPhoneNumberInfo();
     }
 } 

@@ -13,10 +13,12 @@ class MessageResponse
     public function __construct(array $data)
     {
         $this->data = $data;
+        // Cloud API v2 响应结构
         $this->messageId = $data['messages'][0]['id'] ?? null;
         $this->success = isset($data['messages'][0]['id']);
         
         if (!$this->success) {
+            // Cloud API 错误响应结构
             $this->errorCode = $data['errors'][0]['code'] ?? null;
             $this->errorMessage = $data['errors'][0]['message'] ?? null;
         }
@@ -35,6 +37,7 @@ class MessageResponse
      */
     public function getMessageId(): ?string
     {
+        // Cloud API 返回 wamid.ID 格式
         return $this->messageId;
     }
 
