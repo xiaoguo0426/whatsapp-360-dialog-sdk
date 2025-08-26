@@ -66,7 +66,6 @@ class Dialog360Client
         $payload['messaging_product'] = 'whatsapp';
         $payload['recipient_type'] = $payload['recipient_type'] ?? 'individual';
         $payload['to'] = $message->getTo();
-
         $attempts = 0;
         $lastException = null;
 

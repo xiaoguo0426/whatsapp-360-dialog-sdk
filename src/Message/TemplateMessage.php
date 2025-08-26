@@ -13,8 +13,9 @@ class TemplateMessage implements MessageInterface
         string $to,
         string $templateName,
         string $language = 'en_US',
-        array $components = []
-    ) {
+        array  $components = []
+    )
+    {
         $this->to = $to;
         $this->templateName = $templateName;
         $this->language = $language;
@@ -38,6 +39,7 @@ class TemplateMessage implements MessageInterface
             'template' => [
                 'name' => $this->templateName,
                 'language' => [
+                    'policy' => 'deterministic',
                     'code' => $this->language
                 ]
             ]
