@@ -66,6 +66,7 @@ class Dialog360Client
         $payload['messaging_product'] = 'whatsapp';
         $payload['recipient_type'] = $payload['recipient_type'] ?? 'individual';
         $payload['to'] = $message->getTo();
+
         $attempts = 0;
         $lastException = null;
 
@@ -134,6 +135,29 @@ class Dialog360Client
         } catch (GuzzleException $e) {
             throw new Dialog360Exception('网络请求失败: ' . $e->getMessage(), 0, $e);
         }
+    }
+
+    /**
+     * @param string $downloadUrl
+     * @param string $savePath
+     * @return bool
+     * @throws Dialog360Exception
+     * @throws GuzzleException
+     */
+    public function downloadMediaFile(string $downloadUrl,string $savePath): bool
+    {
+        // Cloud API 指南：将 lookaside 主机替换为 waba-v2 根域后面的路径
+        $parsed = parse_url($downloadUrl);
+        if (!$parsed || !isset($parsed['path'])) {
+            throw new Dialog360Exception('媒体下载URL无效');
+        }
+        $path = $parsed['path'] . (isset($parsed['query']) ? ('?' . $parsed['query']) : '');
+
+        // 通过相对路径请求（自动带上 D360-API-KEY 头）
+        $response = $this->httpClient->get($path);
+        $content = $response->getBody()->getContents();
+
+        return (bool)file_put_contents($savePath, $content);
     }
 
     /**
