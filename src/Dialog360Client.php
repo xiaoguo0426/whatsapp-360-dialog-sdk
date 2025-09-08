@@ -119,6 +119,72 @@ class Dialog360Client
     }
 
     /**
+     * 上传媒体文件（Cloud API: POST /media）
+     * @param string $filePath 本地文件路径
+     * @param string $mimeType MIME类型
+     * @return string 返回媒体ID
+     * @throws Dialog360Exception
+     */
+    public function uploadMedia(string $filePath, string $mimeType): string
+    {
+        if (!file_exists($filePath)) {
+            throw new Dialog360Exception('文件不存在: ' . $filePath);
+        }
+
+        // 验证文件大小和类型
+        $this->validateMediaFile($filePath, $mimeType);
+
+        $attempts = 0;
+        $lastException = null;
+
+        while ($attempts < $this->retryAttempts) {
+            try {
+                $response = $this->httpClient->post('/media', [
+                    'multipart' => [
+                        [
+                            'name' => 'messaging_product',
+                            'contents' => 'whatsapp'
+                        ],
+                        [
+                            'name' => 'file',
+                            'contents' => fopen($filePath, 'r'),
+                            'filename' => basename($filePath),
+                            'type' => $mimeType
+                        ]
+                    ]
+                ]);
+
+                $data = json_decode($response->getBody()->getContents(), true);
+                
+                if (!isset($data['id'])) {
+                    throw new Dialog360Exception('上传响应中缺少媒体ID');
+                }
+
+                return $data['id'];
+
+            } catch (RequestException $e) {
+                $lastException = $e;
+                $attempts++;
+
+                if ($attempts >= $this->retryAttempts) {
+                    break;
+                }
+
+                // 等待一段时间后重试
+                sleep(pow(2, $attempts));
+            } catch (GuzzleException $e) {
+                throw new Dialog360Exception('网络请求失败: ' . $e->getMessage(), 0, $e);
+            }
+        }
+
+        throw new Dialog360Exception(
+            '上传媒体文件失败，已重试' . $this->retryAttempts . '次: ' . $lastException->getMessage(),
+            0,
+            $lastException
+        );
+    }
+
+    /**
      * 获取媒体文件信息（Cloud API: GET /{media-id}）
      * @param string $mediaId
      * @return MediaResponse
@@ -158,6 +224,24 @@ class Dialog360Client
         $content = $response->getBody()->getContents();
 
         return (bool)file_put_contents($savePath, $content);
+    }
+
+    /**
+     * 删除媒体文件（Cloud API: DELETE /{media-id}）
+     * @param string $mediaId
+     * @return bool
+     * @throws Dialog360Exception
+     */
+    public function deleteMedia(string $mediaId): bool
+    {
+        try {
+            $response = $this->httpClient->delete("/{$mediaId}");
+            return $response->getStatusCode() === 200;
+        } catch (RequestException $e) {
+            throw new Dialog360Exception('删除媒体文件失败: ' . $e->getMessage(), 0, $e);
+        } catch (GuzzleException $e) {
+            throw new Dialog360Exception('网络请求失败: ' . $e->getMessage(), 0, $e);
+        }
     }
 
     /**
@@ -372,6 +456,82 @@ class Dialog360Client
             $lastException
         );
 
+    }
+
+    /**
+     * 验证媒体文件
+     * @param string $filePath
+     * @param string $mimeType
+     * @throws Dialog360Exception
+     */
+    private function validateMediaFile(string $filePath, string $mimeType): void
+    {
+        $fileSize = filesize($filePath);
+        
+        // 根据文档定义的文件大小限制
+        $sizeLimits = [
+            'audio' => 16 * 1024 * 1024, // 16MB
+            'image' => 5 * 1024 * 1024,  // 5MB
+            'video' => 16 * 1024 * 1024, // 16MB
+            'document' => 100 * 1024 * 1024, // 100MB
+            'sticker' => 500 * 1024, // 500KB (动画贴纸)
+        ];
+
+        // 检查文件大小
+        if ($fileSize > 100 * 1024 * 1024) { // 最大100MB
+            throw new Dialog360Exception('文件大小超过100MB限制');
+        }
+
+        // 根据MIME类型检查特定限制
+        if (strpos($mimeType, 'audio/') === 0 && $fileSize > $sizeLimits['audio']) {
+            throw new Dialog360Exception('音频文件大小超过16MB限制');
+        }
+        
+        if (strpos($mimeType, 'image/') === 0) {
+            if ($mimeType === 'image/webp' && $fileSize > $sizeLimits['sticker']) {
+                throw new Dialog360Exception('贴纸文件大小超过500KB限制');
+            }
+            if ($mimeType !== 'image/webp' && $fileSize > $sizeLimits['image']) {
+                throw new Dialog360Exception('图片文件大小超过5MB限制');
+            }
+        }
+        
+        if (strpos($mimeType, 'video/') === 0 && $fileSize > $sizeLimits['video']) {
+            throw new Dialog360Exception('视频文件大小超过16MB限制');
+        }
+
+        // 验证支持的MIME类型（支持带codecs参数的格式）
+        $supportedTypes = [
+            // 音频
+            'audio/aac', 'audio/amr', 'audio/mpeg', 'audio/mp4', 'audio/ogg',
+            'audio/ogg; codecs=opus', 'audio/ogg; codecs=vorbis',
+            // 图片
+            'image/jpeg', 'image/png', 'image/webp',
+            // 视频
+            'video/mp4', 'video/3gp',
+            // 文档
+            'text/plain', 'application/pdf', 'application/vnd.ms-powerpoint',
+            'application/msword', 'application/vnd.ms-excel',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        ];
+
+        // 检查基础MIME类型（忽略codecs参数）
+        $baseMimeType = explode(';', $mimeType)[0];
+        $isSupported = false;
+        
+        foreach ($supportedTypes as $supportedType) {
+            $baseSupportedType = explode(';', $supportedType)[0];
+            if ($baseMimeType === $baseSupportedType) {
+                $isSupported = true;
+                break;
+            }
+        }
+
+        if (!$isSupported) {
+            throw new Dialog360Exception('不支持的媒体类型: ' . $mimeType);
+        }
     }
 
     /**
