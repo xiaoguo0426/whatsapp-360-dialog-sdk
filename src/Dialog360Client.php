@@ -4,10 +4,11 @@ namespace Dialog360;
 
 use Dialog360\Exception\Dialog360Exception;
 use Dialog360\Message\MessageInterface;
-use Dialog360\Response\MessageResponse;
 use Dialog360\Response\MediaResponse;
+use Dialog360\Response\MessageResponse;
 use Dialog360\Response\PhoneNumberWebhookResponse;
 use Dialog360\Response\SetWabaWebhookUrlResponse;
+use Dialog360\Response\TemplateMessageResponse;
 use Dialog360\Response\WabaWebhookResponse;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
@@ -155,7 +156,7 @@ class Dialog360Client
                 ]);
 
                 $data = json_decode($response->getBody()->getContents(), true);
-                
+
                 if (!isset($data['id'])) {
                     throw new Dialog360Exception('上传响应中缺少媒体ID');
                 }
@@ -210,7 +211,7 @@ class Dialog360Client
      * @throws Dialog360Exception
      * @throws GuzzleException
      */
-    public function downloadMediaFile(string $downloadUrl,string $savePath): bool
+    public function downloadMediaFile(string $downloadUrl, string $savePath): bool
     {
         // Cloud API 指南：将 lookaside 主机替换为 waba-v2 根域后面的路径
         $parsed = parse_url($downloadUrl);
@@ -287,9 +288,31 @@ class Dialog360Client
     /**
      * 获取可用的模板（Cloud API 暂无 Messaging 端点）
      */
-    public function getTemplates(): array
+    public function getTemplates(array $filters = [], string $sort = '', int $offset = 0, int $limit = 1000): TemplateMessageResponse
     {
-        throw new Dialog360Exception('Cloud API 暂不支持通过 Messaging API 列出模板，请使用 Meta Graph API 或在 360dialog Hub 管理模板。');
+
+        $query = [
+            'offset' => $offset,
+            'limit' => $limit
+        ];
+        if ($filters) {
+            $query['filters'] = json_encode($filters);
+        }
+        if ($sort) {
+            $query['sort'] = $sort;
+        }
+
+        try {
+            $response = $this->httpClient->get("/v1/configs/templates", [
+                'query' => $query
+            ]);
+            $data = json_decode($response->getBody()->getContents(), true);
+            return new TemplateMessageResponse($data);
+        } catch (RequestException $e) {
+            throw new Dialog360Exception('获取媒体信息失败: ' . $e->getMessage(), 0, $e);
+        } catch (GuzzleException $e) {
+            throw new Dialog360Exception('网络请求失败: ' . $e->getMessage(), 0, $e);
+        }
     }
 
     /**
@@ -467,7 +490,7 @@ class Dialog360Client
     private function validateMediaFile(string $filePath, string $mimeType): void
     {
         $fileSize = filesize($filePath);
-        
+
         // 根据文档定义的文件大小限制
         $sizeLimits = [
             'audio' => 16 * 1024 * 1024, // 16MB
@@ -486,7 +509,7 @@ class Dialog360Client
         if (strpos($mimeType, 'audio/') === 0 && $fileSize > $sizeLimits['audio']) {
             throw new Dialog360Exception('音频文件大小超过16MB限制');
         }
-        
+
         if (strpos($mimeType, 'image/') === 0) {
             if ($mimeType === 'image/webp' && $fileSize > $sizeLimits['sticker']) {
                 throw new Dialog360Exception('贴纸文件大小超过500KB限制');
@@ -495,7 +518,7 @@ class Dialog360Client
                 throw new Dialog360Exception('图片文件大小超过5MB限制');
             }
         }
-        
+
         if (strpos($mimeType, 'video/') === 0 && $fileSize > $sizeLimits['video']) {
             throw new Dialog360Exception('视频文件大小超过16MB限制');
         }
@@ -520,7 +543,7 @@ class Dialog360Client
         // 检查基础MIME类型（忽略codecs参数）
         $baseMimeType = explode(';', $mimeType)[0];
         $isSupported = false;
-        
+
         foreach ($supportedTypes as $supportedType) {
             $baseSupportedType = explode(';', $supportedType)[0];
             if ($baseMimeType === $baseSupportedType) {

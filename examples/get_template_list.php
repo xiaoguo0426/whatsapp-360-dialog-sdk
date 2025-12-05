@@ -3,9 +3,7 @@
 require_once __DIR__ . '/../vendor/autoload.php';
 
 use Dialog360\Dialog360Client;
-use Dialog360\Message\InteractiveMessage;
 use Dialog360\EnvironmentLoader;
-use Dialog360\Response\WabaWebhookResponse;
 
 // 加载环境变量
 EnvironmentLoader::load();
@@ -20,6 +18,17 @@ $retryAttempts = (int)EnvironmentLoader::get('DIALOG360_RETRY_ATTEMPTS', 3);
 // 初始化客户端
 $client = new Dialog360Client($apiKey, $phoneNumberId, $baseUrl, $timeout, $retryAttempts);
 
-$wabaWebhookResponse =$client->getWabaWebhookUrl();
+try {
+    $filters = [
+//        'id' => 'generic_msg_v2',
+//        'partner_id'=>'1OyuqDPA',
+        'business_templates.name'=>'camp_inv_v_8', //没有测试通过
+//        'status'=>'rejected'   //approved/rejected/created
+//            'category'=>'',
+    ];
+    $response = $client->getTemplates($filters, 'id');
+    var_dump($response->getWabaTemplates());
 
-var_dump($wabaWebhookResponse->toArray());
+} catch (Exception $e) {
+    echo "❌ 发生错误: " . $e->getMessage() . "\n";
+} 
