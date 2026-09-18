@@ -3,8 +3,8 @@
 require_once __DIR__ . '/../vendor/autoload.php';
 
 use Dialog360\Dialog360Client;
+use Dialog360\Message\LocationMessage;
 use Dialog360\EnvironmentLoader;
-use Dialog360\Message\TextMessage;
 
 // 加载环境变量
 EnvironmentLoader::load();
@@ -22,21 +22,31 @@ $to_phone_number = EnvironmentLoader::get('TO_PHONE_NUMBER', '');
 $client = new Dialog360Client($apiKey, $phoneNumberId, $baseUrl, $timeout, $retryAttempts);
 
 try {
-    // 创建文本消息
-    $message = new TextMessage(
+    // 创建位置消息（完整字段：经纬度 + 名称 + 地址）
+    $message = LocationMessage::named(
         to: $to_phone_number, // 替换为实际的电话号码
-        text: 'Hello from 360 Dialog PHP SDK!',
-        previewUrl: false
+        longitude: 114.1694,
+        latitude: 22.2933,
+        name: 'Victoria Harbour',
+        address: 'Tsim Sha Tsui, Hong Kong'
     );
+
+    // 也可以仅发送经纬度（最简形式）
+//     $message = LocationMessage::coordinates(
+//         to: $to_phone_number,
+//         longitude: 114.1694,
+//         latitude: 22.2933
+//     );
 
     // 发送消息
     $response = $client->sendMessage($message);
 
+    var_dump($response);
+
     // 检查响应
     if ($response->isSuccess()) {
-        echo "✅ 消息发送成功！\n";
+        echo "✅ 位置消息发送成功！\n";
         echo "消息ID: " . $response->getMessageId() . "\n";
-
     } else {
         echo "❌ 发送失败！\n";
         echo "错误代码: " . $response->getErrorCode() . "\n";
@@ -44,4 +54,4 @@ try {
     }
 } catch (Exception $e) {
     echo "❌ 发生错误: " . $e->getMessage() . "\n";
-} 
+}

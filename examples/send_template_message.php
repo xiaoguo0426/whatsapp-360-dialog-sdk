@@ -3,8 +3,8 @@
 require_once __DIR__ . '/../vendor/autoload.php';
 
 use Dialog360\Dialog360Client;
-use Dialog360\Message\TemplateMessage;
 use Dialog360\EnvironmentLoader;
+use Dialog360\Message\TemplateMessage;
 
 // 加载环境变量
 EnvironmentLoader::load();
@@ -16,19 +16,21 @@ $baseUrl = EnvironmentLoader::get('DIALOG360_BASE_URL', 'https://waba-v2.360dial
 $timeout = (int)EnvironmentLoader::get('DIALOG360_TIMEOUT', 30);
 $retryAttempts = (int)EnvironmentLoader::get('DIALOG360_RETRY_ATTEMPTS', 3);
 
+$to_phone_number = EnvironmentLoader::get('TO_PHONE_NUMBER', '');
+
 // 初始化客户端
 $client = new Dialog360Client($apiKey, $phoneNumberId, $baseUrl, $timeout, $retryAttempts);
 
 try {
     // 发送简单的模板消息
     $templateMessage = new TemplateMessage(
-        to: '1234567890',
+        to: $to_phone_number,
         templateName: 'hello_world',
         language: 'en_US'
     );
-    
+
     $response = $client->sendMessage($templateMessage);
-    
+
     if ($response->isSuccess()) {
         echo "✅ 模板消息发送成功！\n";
         echo "消息ID: " . $response->getMessageId() . "\n";
@@ -80,9 +82,9 @@ try {
             ]
         ]
     );
-    
+
     $response = $client->sendMessage($templateWithParams);
-    
+
     if ($response->isSuccess()) {
         echo "✅ 带参数的模板消息发送成功！\n";
         echo "消息ID: " . $response->getMessageId() . "\n";

@@ -16,13 +16,15 @@ $baseUrl = EnvironmentLoader::get('DIALOG360_BASE_URL', 'https://waba-v2.360dial
 $timeout = (int)EnvironmentLoader::get('DIALOG360_TIMEOUT', 30);
 $retryAttempts = (int)EnvironmentLoader::get('DIALOG360_RETRY_ATTEMPTS', 3);
 
+$to_phone_number = EnvironmentLoader::get('TO_PHONE_NUMBER', '');
+
 // 初始化客户端
 $client = new Dialog360Client($apiKey, $phoneNumberId, $baseUrl, $timeout, $retryAttempts);
 
 try {
     // 发送图片消息
     $imageMessage = MediaMessage::image(
-        to: '1234567890',
+        to: $to_phone_number,
         url: 'https://example.com/image.jpg',
         caption: 'Beautiful sunset!'
     );
