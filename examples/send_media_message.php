@@ -3,8 +3,8 @@
 require_once __DIR__ . '/../vendor/autoload.php';
 
 use Dialog360\Dialog360Client;
-use Dialog360\Message\MediaMessage;
 use Dialog360\EnvironmentLoader;
+use Dialog360\Message\MediaMessage;
 
 // 加载环境变量
 EnvironmentLoader::load();
@@ -28,9 +28,9 @@ try {
         url: 'https://example.com/image.jpg',
         caption: 'Beautiful sunset!'
     );
-    
+
     $response = $client->sendMessage($imageMessage);
-    
+
     if ($response->isSuccess()) {
         echo "✅ 图片消息发送成功！\n";
         echo "消息ID: " . $response->getMessageId() . "\n";
@@ -41,12 +41,12 @@ try {
 
     // 发送音频消息
     $audioMessage = MediaMessage::audio(
-        to: '1234567890',
+        to: $to_phone_number,
         url: 'https://example.com/audio.mp3'
     );
-    
+
     $response = $client->sendMessage($audioMessage);
-    
+
     if ($response->isSuccess()) {
         echo "✅ 音频消息发送成功！\n";
         echo "消息ID: " . $response->getMessageId() . "\n";
@@ -57,13 +57,13 @@ try {
 
     // 发送视频消息
     $videoMessage = MediaMessage::video(
-        to: '1234567890',
+        to: $to_phone_number,
         url: 'https://example.com/video.mp4',
         caption: 'Check out this amazing video!'
     );
-    
+
     $response = $client->sendMessage($videoMessage);
-    
+
     if ($response->isSuccess()) {
         echo "✅ 视频消息发送成功！\n";
         echo "消息ID: " . $response->getMessageId() . "\n";
@@ -74,14 +74,14 @@ try {
 
     // 发送文档消息
     $documentMessage = MediaMessage::document(
-        to: '1234567890',
+        to: $to_phone_number,
         url: 'https://example.com/document.pdf',
         caption: 'Important document for you',
         filename: 'document.pdf'
     );
-    
+
     $response = $client->sendMessage($documentMessage);
-    
+
     if ($response->isSuccess()) {
         echo "✅ 文档消息发送成功！\n";
         echo "消息ID: " . $response->getMessageId() . "\n";

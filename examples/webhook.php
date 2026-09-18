@@ -6,9 +6,9 @@
  * 包括消息接收、状态更新、媒体下载等功能
  */
 
-// 设置错误报告
+// 设置错误报告（生产环境必须关闭 display_errors，避免错误输出污染响应体导致验证失败）
 error_reporting(E_ALL);
-ini_set('display_errors', 1);
+ini_set('display_errors', 0);
 
 // 设置日志文件
 ini_set('log_errors', 1);
@@ -31,7 +31,6 @@ class Dialog360WebhookReceiver
 {
     private Dialog360Client $client;
     private string $verifyToken;
-    private array $webhookEvents = [];
 
     public function __construct()
     {
@@ -102,57 +101,84 @@ class Dialog360WebhookReceiver
         // 获取原始 POST 数据
         $input = file_get_contents('php://input');
         $data = json_decode($input, true);
-        $this->logInfo($data);
-        return ;
-        if (!$data) {
-            $this->logError('无法解析 webhook 数据');
+
+        if (json_last_error() !== JSON_ERROR_NONE || !is_array($data)) {
+            $this->logError('无法解析 webhook 数据: ' . $input);
             http_response_code(400);
             return;
         }
 
         $this->logInfo('收到 webhook 数据: ' . $input);
 
-        // 处理不同类型的 webhook 事件
-        if (isset($data['entry'][0]['changes'][0]['value'])) {
-            $value = $data['entry'][0]['changes'][0]['value'];
-
-            // 处理消息
-            if (isset($value['messages'])) {
-                $this->processMessages($value['messages']);
-            }
-
-            // 处理状态更新
-            if (isset($value['statuses'])) {
-                $this->processStatuses($value['statuses']);
-            }
-
-            // 处理其他事件
-            if (isset($value['messaging_product'])) {
-                $this->processOtherEvents($value);
-            }
-        }
-
-        // 返回成功响应
+        // 立即返回 200 确认接收（360dialog 要求尽快响应，超时或失败会重试投递，导致消息重复处理）
         http_response_code(200);
         echo json_encode(['status' => 'ok']);
+
+        // PHP-FPM 环境下立即将响应发回给 360dialog，后续业务逻辑继续在本请求中执行
+        if (function_exists('fastcgi_finish_request')) {
+            fastcgi_finish_request();
+        }
+
+        // 业务处理异常不再影响已返回的 200 响应（避免触发 360dialog 重试）
+        try {
+            // 遍历所有 entry 和 changes，避免遗漏批量推送的数据
+            foreach ($data['entry'] ?? [] as $entry) {
+                foreach ($entry['changes'] ?? [] as $change) {
+                    // 只处理消息类事件（其他如模板状态审核等事件暂不处理）
+                    if (($change['field'] ?? '') !== 'messages') {
+                        $this->logInfo('忽略非消息事件: ' . ($change['field'] ?? 'unknown'));
+                        continue;
+                    }
+
+                    $value = $change['value'] ?? [];
+                    if (isset($value['messages'])) {
+                        $this->processMessages($value['messages'], $value);
+                    }
+
+                    if (isset($value['statuses'])) {
+                        $this->processStatuses($value['statuses'], $value);
+                    }
+                }
+            }
+        } catch (Throwable $e) {
+            $this->logError('webhook 业务处理错误: ' . $e->getMessage());
+        }
     }
 
     /**
      * 处理接收到的消息
+     *
+     * @param array $messages 消息数组
+     * @param array $value changes[].value 完整数据（含 contacts、metadata 等上下文）
      */
-    private function processMessages(array $messages): void
+    private function processMessages(array $messages, array $value = []): void
     {
+        // 提取公共上下文: 联系人信息与号码元数据
+        $contact = $value['contacts'][0] ?? [];
+        $metadata = $value['metadata'] ?? [];
+        $contactName = $contact['profile']['name'] ?? '';
+        $waId = $contact['wa_id'] ?? '';
+        $userId = $contact['user_id'] ?? '';
+        $displayPhoneNumber = $metadata['display_phone_number'] ?? '';
+        $phoneNumberId = $metadata['phone_number_id'] ?? '';
+
+        $this->logInfo(sprintf(
+            '收到消息事件: 发送人=%s(wa_id: %s, user_id: %s), 接收号码=%s (phone_number_id: %s)',
+            $contactName !== '' ? $contactName : '未知',
+            $waId,
+            $userId,
+            $displayPhoneNumber,
+            $phoneNumberId
+        ));
+
         foreach ($messages as $message) {
-            $this->logInfo('处理消息: ' . json_encode($message));
+            $this->logInfo('处理消息: ' . json_encode($message, JSON_UNESCAPED_UNICODE));
 
             $messageType = $message['type'] ?? 'unknown';
-            $from = $message['from'] ?? '';
-            $timestamp = $message['timestamp'] ?? '';
-            $messageId = $message['id'] ?? '';
 
             switch ($messageType) {
                 case 'text':
-                    $this->handleTextMessage($message);
+                    $this->handleTextMessage($message, $contact);
                     break;
                 case 'image':
                     $this->handleImageMessage($message);
@@ -166,11 +192,20 @@ class Dialog360WebhookReceiver
                 case 'document':
                     $this->handleDocumentMessage($message);
                     break;
+                case 'sticker':
+                    $this->handleStickerMessage($message);
+                    break;
                 case 'location':
                     $this->handleLocationMessage($message);
                     break;
                 case 'contacts':
                     $this->handleContactsMessage($message);
+                    break;
+                case 'reaction':
+                    $this->handleReactionMessage($message);
+                    break;
+                case 'button':
+                    $this->handleButtonMessage($message);
                     break;
                 case 'interactive':
                     $this->handleInteractiveMessage($message);
@@ -184,20 +219,25 @@ class Dialog360WebhookReceiver
 
     /**
      * 处理文本消息
+     *
+     * @param array $message 消息数据
+     * @param array $contact 联系人信息（含 profile.name，可用于个性化回复）
      */
-    private function handleTextMessage(array $message): void
+    private function handleTextMessage(array $message, array $contact = []): void
     {
         $text = $message['text']['body'] ?? '';
         $from = $message['from'] ?? '';
+        $name = $contact['profile']['name'] ?? '';
 
-        $this->logInfo("收到来自 {$from} 的文本消息: {$text}");
+        $this->logInfo(sprintf('收到来自 %s%s 的文本消息: %s', $name !== '' ? "{$name} " : '', $from, $text));
 
         // 这里可以添加您的业务逻辑
         // 例如：自动回复、消息转发、内容分析等
 
-        // 示例：自动回复
+        // 示例：自动回复（利用联系人名称做个性化问候）
         if (str_contains(strtolower($text), 'hello') || str_contains(strtolower($text), 'hi')) {
-            $this->sendAutoReply($from, 'Hello! 感谢您的消息，我们会尽快回复您。');
+            $greeting = $name !== '' ? "Hello {$name}! " : 'Hello! ';
+            $this->sendAutoReply($from, $greeting . '感谢您的消息，我们会尽快回复您。');
         }
     }
 
@@ -363,16 +403,88 @@ class Dialog360WebhookReceiver
     }
 
     /**
-     * 处理状态更新
+     * 处理贴图消息
      */
-    private function processStatuses(array $statuses): void
+    private function handleStickerMessage(array $message): void
     {
+        $sticker = $message['sticker'] ?? [];
+        $from = $message['from'] ?? '';
+        $mediaId = $sticker['id'] ?? '';
+        $animated = !empty($sticker['animated']);
+
+        $this->logInfo("收到来自 {$from} 的贴图消息: {$mediaId}" . ($animated ? '（动画贴图）' : ''));
+
+        // 处理贴图消息的逻辑（如需保存可通过 getMediaInfo/downloadMedia 下载）
+    }
+
+    /**
+     * 处理表情回应消息（用户对已收到的消息做出 emoji 回应）
+     */
+    private function handleReactionMessage(array $message): void
+    {
+        $reaction = $message['reaction'] ?? [];
+        $from = $message['from'] ?? '';
+        $emoji = $reaction['emoji'] ?? '';
+        $targetMessageId = $reaction['message_id'] ?? '';
+
+        $this->logInfo("收到来自 {$from} 的表情回应: {$emoji}（针对消息 {$targetMessageId}）");
+
+        // 处理表情回应的逻辑，例如更新对应消息的回应状态
+    }
+
+    /**
+     * 处理按钮回复消息
+     */
+    private function handleButtonMessage(array $message): void
+    {
+        $button = $message['button'] ?? [];
+        $from = $message['from'] ?? '';
+        $buttonText = $button['text'] ?? '';
+        $buttonPayload = $button['payload'] ?? '';
+
+        $this->logInfo("收到来自 {$from} 的按钮回复: {$buttonText}（{$buttonPayload}）");
+
+        // 根据 payload 处理不同的操作
+        // $this->handleButtonReply($from, $buttonPayload, $buttonText);
+    }
+
+    /**
+     * 处理状态更新
+     *
+     * @param array $statuses 状态数组
+     * @param array $value changes[].value 完整数据（含 metadata 等上下文）
+     */
+    private function processStatuses(array $statuses, array $value = []): void
+    {
+        $metadata = $value['metadata'] ?? [];
+        $displayPhoneNumber = $metadata['display_phone_number'] ?? '';
+
         foreach ($statuses as $status) {
             $messageId = $status['id'] ?? '';
             $statusType = $status['status'] ?? '';
             $timestamp = $status['timestamp'] ?? '';
+            $recipientId = $status['recipient_id'] ?? '';
+            $recipientUserId = $status['recipient_user_id'] ?? '';
+            $conversation = $status['conversation'] ?? [];
+            $pricing = $status['pricing'] ?? [];
 
-            $this->logInfo("消息状态更新: {$messageId} -> {$statusType}");
+            $billableStr = array_key_exists('billable', $pricing)
+                ? ($pricing['billable'] ? '计费' : '免费')
+                : '-';
+
+            $this->logInfo(sprintf(
+                '消息状态更新: %s -> %s, 接收人: %s(user_id: %s), 发送号码: %s, 会话: %s（来源: %s）, 计费: %s（%s/%s）',
+                $messageId,
+                $statusType,
+                $recipientId,
+                $recipientUserId,
+                $displayPhoneNumber,
+                $conversation['id'] ?? '-',
+                $conversation['origin']['type'] ?? '-',
+                $billableStr,
+                $pricing['pricing_model'] ?? '-',
+                $pricing['category'] ?? '-'
+            ));
 
             // 根据状态类型处理不同的逻辑
             switch ($statusType) {
@@ -483,7 +595,6 @@ class Dialog360WebhookReceiver
 try {
     $receiver = new Dialog360WebhookReceiver();
     $receiver->handleWebhook();
-    echo 'ok';
 } catch (Exception $e) {
     error_log('Webhook 接收器初始化失败: ' . $e->getMessage());
     http_response_code(500);
