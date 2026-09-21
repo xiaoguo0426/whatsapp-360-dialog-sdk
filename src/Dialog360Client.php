@@ -81,6 +81,14 @@ class Dialog360Client
                 return new MessageResponse($data);
 
             } catch (RequestException $e) {
+                // 4xx 客户端错误（如号码无效、参数错误）重试无意义，直接解析错误响应并返回
+                $errorResponse = $e->getResponse();
+                if ($errorResponse !== null && $errorResponse->getStatusCode() < 500) {
+                    $data = json_decode((string)$errorResponse->getBody(), true);
+                    return new MessageResponse(is_array($data) ? $data : []);
+                }
+
+                // 5xx 或网络错误（无响应）属于暂时性错误，重试
                 $lastException = $e;
                 $attempts++;
 
