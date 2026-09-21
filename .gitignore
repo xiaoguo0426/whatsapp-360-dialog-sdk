@@ -1,6 +1,5 @@
 # Composer
 /vendor/
-composer.lock
 
 # IDE
 .vscode/
@@ -14,6 +13,7 @@ Thumbs.db
 
 # Testing
 .phpunit.cache/
+.phpunit.result.cache
 coverage/
 coverage.txt
 

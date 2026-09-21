@@ -1,11 +1,11 @@
 <?php
 
-require_once __DIR__ . '/../vendor/autoload.php';
+require_once __DIR__ . '/../../vendor/autoload.php';
 
 use Dialog360\Dialog360Client;
 use Dialog360\Message\InteractiveMessage;
 use Dialog360\EnvironmentLoader;
-use Dialog360\Response\WabaWebhookResponse;
+use Dialog360\Response\PhoneNumberWebhookResponse;
 
 // 加载环境变量
 EnvironmentLoader::load();
@@ -20,7 +20,6 @@ $retryAttempts = (int)EnvironmentLoader::get('DIALOG360_RETRY_ATTEMPTS', 3);
 // 初始化客户端
 $client = new Dialog360Client($apiKey, $phoneNumberId, $baseUrl, $timeout, $retryAttempts);
 
-$wabaWebhookResponse =$client->getWabaWebhookUrl();
+$phoneNumberWebhookResponse= $client->getWebhookUrl();
 
-var_dump($wabaWebhookResponse->getData());
-var_dump($wabaWebhookResponse->toArray());
+var_dump($phoneNumberWebhookResponse->toArray());
