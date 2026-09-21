@@ -1,6 +1,6 @@
 <?php
 
-require_once __DIR__ . '/../vendor/autoload.php';
+require_once __DIR__ . '/../../vendor/autoload.php';
 
 use Dialog360\Dialog360Client;
 use Dialog360\Message\InteractiveMessage;
@@ -20,6 +20,7 @@ $retryAttempts = (int)EnvironmentLoader::get('DIALOG360_RETRY_ATTEMPTS', 3);
 // 初始化客户端
 $client = new Dialog360Client($apiKey, $phoneNumberId, $baseUrl, $timeout, $retryAttempts);
 
-$phoneNumberWebhookResponse= $client->getWebhookUrl();
+$webhook_url = 'https://whatsapp-360-dialog.prizmgz.com/webhook.php';
+$phoneNumberWebhookResponse= $client->setWebhookUrl($webhook_url);
 
 var_dump($phoneNumberWebhookResponse->toArray());
