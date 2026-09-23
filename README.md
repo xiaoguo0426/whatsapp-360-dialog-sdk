@@ -43,6 +43,39 @@ if ($response->isSuccess()) {
 }
 ```
 
+## 用法：域访问器（推荐）
+
+客户端按 API 资源域拆分，推荐通过域访问器调用：
+
+```php
+// 消息：发送各类消息（文本/媒体/模板/交互/联系人/位置/表情回应/贴纸）
+$response = $client->messages()->send($message);
+
+// 媒体：上传 / 查询 / 下载 / 删除
+$mediaId = $client->media()->upload('/path/to/file.jpg', 'image/jpeg');
+$mediaInfo = $client->media()->getInfo($mediaId);
+$content = $client->media()->download($mediaId, '/tmp/image.jpg'); // 可选保存到本地
+$client->media()->delete($mediaId);
+
+// Webhook：电话号码级
+$client->webhook()->setUrl('https://example.com/webhook');
+$webhook = $client->webhook()->getUrl();
+
+// Webhook：WABA 级
+$client->webhook()->setWabaUrl('https://example.com/webhook', headers: [], overrideAll: false);
+$config = $client->webhook()->getWabaUrl();
+
+// 模板：查询模板列表
+$templates = $client->templates()->list();
+
+// 健康状态
+$health = $client->health()->status();
+```
+
+旧的扁平方法（`sendMessage()`、`uploadMedia()`、`setWebhookUrl()` 等）仍然可用，已标注 `@deprecated`，内部一行委托到对应域方法，后续版本才会移除。
+
+重试与错误语义在传输层统一：4xx 客户端错误立即抛出 `Dialog360\Exception\Dialog360ClientError`（携带 API 错误响应体，不重试）；5xx/网络错误指数退避重试，耗尽后抛 `Dialog360Exception`。例外：`messages()->send()` 捕获 4xx 并返回 `isSuccess=false` 的 `MessageResponse`（与历史行为一致）。
+
 ## 功能特性
 
 - ✅ 发送文本消息

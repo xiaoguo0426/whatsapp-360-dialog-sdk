@@ -3,6 +3,7 @@
 namespace Dialog360\Exception;
 
 use Exception;
+use Throwable;
 
 class Dialog360Exception extends Exception
 {
@@ -12,7 +13,7 @@ class Dialog360Exception extends Exception
     public function __construct(
         string $message = '',
         int $code = 0,
-        ?Exception $previous = null,
+        ?Throwable $previous = null,
         ?string $errorCode = null,
         ?array $errorData = null
     ) {
@@ -48,7 +49,7 @@ class Dialog360Exception extends Exception
     /**
      * 创建网络错误异常
      */
-    public static function networkError(string $message, Exception $previous = null): self
+    public static function networkError(string $message, ?Throwable $previous = null): self
     {
         return new self($message, 0, $previous, 'NETWORK_ERROR');
     }

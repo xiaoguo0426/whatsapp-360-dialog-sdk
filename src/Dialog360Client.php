@@ -2,7 +2,13 @@
 
 namespace Dialog360;
 
+use Dialog360\Api\HealthApi;
+use Dialog360\Api\MediaApi;
+use Dialog360\Api\MessagesApi;
+use Dialog360\Api\TemplateApi;
+use Dialog360\Api\WebhookApi;
 use Dialog360\Exception\Dialog360Exception;
+use Dialog360\Http\ApiConnector;
 use Dialog360\Message\MessageInterface;
 use Dialog360\Response\MediaResponse;
 use Dialog360\Response\MessageResponse;
@@ -12,9 +18,20 @@ use Dialog360\Response\TemplateMessageResponse;
 use Dialog360\Response\WabaWebhookResponse;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
-use GuzzleHttp\Exception\RequestException;
 use GuzzleHttp\HandlerStack;
 
+/**
+ * 360dialog WhatsApp Cloud API 客户端（门面）。
+ *
+ * 推荐通过域访问器使用：
+ *   $client->messages()->send($message);
+ *   $client->media()->upload($filePath, $mimeType);
+ *   $client->webhook()->setUrl('https://...');
+ *   $client->templates()->list();
+ *   $client->health()->status();
+ *
+ * 旧的扁平方法（sendMessage/uploadMedia/...）保留为向后兼容的一行委托，已标注 @deprecated。
+ */
 class Dialog360Client
 {
     private string $apiKey;
@@ -22,7 +39,13 @@ class Dialog360Client
     private string $baseUrl;
     private int $timeout;
     private int $retryAttempts;
-    private Client $httpClient;
+    private ApiConnector $connector;
+
+    private ?MessagesApi $messagesApi = null;
+    private ?MediaApi $mediaApi = null;
+    private ?WebhookApi $webhookApi = null;
+    private ?TemplateApi $templateApi = null;
+    private ?HealthApi $healthApi = null;
 
     public function __construct(
         string        $apiKey,
@@ -52,241 +75,140 @@ class Dialog360Client
             $clientOptions['handler'] = $handlerStack;
         }
 
-        $this->httpClient = new Client($clientOptions);
+        $this->connector = new ApiConnector(new Client($clientOptions), $this->retryAttempts);
+    }
+
+    /** ===== 域访问器（新用法入口） ===== */
+
+    /**
+     * 消息 API 域（发送各类消息）
+     */
+    public function messages(): MessagesApi
+    {
+        return $this->messagesApi ??= new MessagesApi($this->connector);
     }
 
     /**
+     * 媒体 API 域（上传/查询/下载/删除媒体文件）
+     */
+    public function media(): MediaApi
+    {
+        return $this->mediaApi ??= new MediaApi($this->connector);
+    }
+
+    /**
+     * Webhook 配置 API 域（电话号码级 / WABA 级）
+     */
+    public function webhook(): WebhookApi
+    {
+        return $this->webhookApi ??= new WebhookApi($this->connector);
+    }
+
+    /**
+     * 模板 API 域（查询模板列表）
+     */
+    public function templates(): TemplateApi
+    {
+        return $this->templateApi ??= new TemplateApi($this->connector);
+    }
+
+    /**
+     * 健康状态 API 域
+     */
+    public function health(): HealthApi
+    {
+        return $this->healthApi ??= new HealthApi($this->connector);
+    }
+
+    /** ===== 向后兼容层（@deprecated，委托实现） ===== */
+
+    /**
      * 发送消息
+     *
      * @param MessageInterface $message
      * @return MessageResponse
      * @throws Dialog360Exception
+     * @deprecated 请使用 $client->messages()->send($message)
      */
     public function sendMessage(MessageInterface $message): MessageResponse
     {
-        $payload = $message->toArray();
-        $payload['messaging_product'] = 'whatsapp';
-        $payload['recipient_type'] = $payload['recipient_type'] ?? 'individual';
-        $payload['to'] = $message->getTo();
-
-        $attempts = 0;
-        $lastException = null;
-
-        while ($attempts < $this->retryAttempts) {
-            try {
-                $response = $this->httpClient->post("/messages", [
-                    'json' => $payload
-                ]);
-
-                $data = json_decode($response->getBody()->getContents(), true);
-                return new MessageResponse($data);
-
-            } catch (RequestException $e) {
-                // 4xx 客户端错误（如号码无效、参数错误）重试无意义，直接解析错误响应并返回
-                $errorResponse = $e->getResponse();
-                if ($errorResponse !== null && $errorResponse->getStatusCode() < 500) {
-                    $data = json_decode((string)$errorResponse->getBody(), true);
-                    return new MessageResponse(is_array($data) ? $data : []);
-                }
-
-                // 5xx 或网络错误（无响应）属于暂时性错误，重试
-                $lastException = $e;
-                $attempts++;
-
-                if ($attempts >= $this->retryAttempts) {
-                    break;
-                }
-
-                // 等待一段时间后重试
-                sleep(pow(2, $attempts));
-            } catch (GuzzleException $e) {
-                throw new Dialog360Exception('网络请求失败: ' . $e->getMessage(), 0, $e);
-            }
-        }
-
-        throw new Dialog360Exception(
-            '发送消息失败，已重试' . $this->retryAttempts . '次: ' . $lastException->getMessage(),
-            0,
-            $lastException
-        );
+        return $this->messages()->send($message);
     }
 
     /**
      * 获取消息发送健康状态（Cloud API）
+     *
      * @return array
      * @throws Dialog360Exception
+     * @deprecated 请使用 $client->health()->status()
      */
     public function getHealthStatus(): array
     {
-        try {
-            $response = $this->httpClient->get('/health_status');
-            return json_decode($response->getBody()->getContents(), true);
-        } catch (RequestException $e) {
-            throw new Dialog360Exception('获取健康状态失败: ' . $e->getMessage(), 0, $e);
-        } catch (GuzzleException $e) {
-            throw new Dialog360Exception('网络请求失败: ' . $e->getMessage(), 0, $e);
-        }
+        return $this->health()->status();
     }
 
     /**
      * 上传媒体文件（Cloud API: POST /media）
+     *
      * @param string $filePath 本地文件路径
      * @param string $mimeType MIME类型
      * @return string 返回媒体ID
      * @throws Dialog360Exception
+     * @deprecated 请使用 $client->media()->upload($filePath, $mimeType)
      */
     public function uploadMedia(string $filePath, string $mimeType): string
     {
-        if (!file_exists($filePath)) {
-            throw new Dialog360Exception('文件不存在: ' . $filePath);
-        }
-
-        // 验证文件大小和类型
-        $this->validateMediaFile($filePath, $mimeType);
-
-        $attempts = 0;
-        $lastException = null;
-
-        while ($attempts < $this->retryAttempts) {
-            try {
-                $response = $this->httpClient->post('/media', [
-                    'multipart' => [
-                        [
-                            'name' => 'messaging_product',
-                            'contents' => 'whatsapp'
-                        ],
-                        [
-                            'name' => 'file',
-                            'contents' => fopen($filePath, 'r'),
-                            'filename' => basename($filePath),
-                            'type' => $mimeType
-                        ]
-                    ]
-                ]);
-
-                $data = json_decode($response->getBody()->getContents(), true);
-
-                if (!isset($data['id'])) {
-                    throw new Dialog360Exception('上传响应中缺少媒体ID');
-                }
-
-                return $data['id'];
-
-            } catch (RequestException $e) {
-                $lastException = $e;
-                $attempts++;
-
-                if ($attempts >= $this->retryAttempts) {
-                    break;
-                }
-
-                // 等待一段时间后重试
-                sleep(pow(2, $attempts));
-            } catch (GuzzleException $e) {
-                throw new Dialog360Exception('网络请求失败: ' . $e->getMessage(), 0, $e);
-            }
-        }
-
-        throw new Dialog360Exception(
-            '上传媒体文件失败，已重试' . $this->retryAttempts . '次: ' . $lastException->getMessage(),
-            0,
-            $lastException
-        );
+        return $this->media()->upload($filePath, $mimeType);
     }
 
     /**
      * 获取媒体文件信息（Cloud API: GET /{media-id}）
-     * @param string $mediaId
-     * @return MediaResponse
+     *
      * @throws Dialog360Exception
+     * @deprecated 请使用 $client->media()->getInfo($mediaId)
      */
     public function getMediaInfo(string $mediaId): MediaResponse
     {
-        try {
-            $response = $this->httpClient->get("/{$mediaId}");
-            $data = json_decode($response->getBody()->getContents(), true);
-            return new MediaResponse($data);
-        } catch (RequestException $e) {
-            throw new Dialog360Exception('获取媒体信息失败: ' . $e->getMessage(), 0, $e);
-        } catch (GuzzleException $e) {
-            throw new Dialog360Exception('网络请求失败: ' . $e->getMessage(), 0, $e);
-        }
+        return $this->media()->getInfo($mediaId);
     }
 
     /**
-     * @param string $downloadUrl
-     * @param string $savePath
-     * @return bool
+     * 通过下载URL直接下载媒体文件并保存
+     *
      * @throws Dialog360Exception
      * @throws GuzzleException
+     * @deprecated 请使用 $client->media()->downloadByUrl($downloadUrl, $savePath)
      */
     public function downloadMediaFile(string $downloadUrl, string $savePath): bool
     {
-        // Cloud API 指南：将 lookaside 主机替换为 waba-v2 根域后面的路径
-        $parsed = parse_url($downloadUrl);
-        if (!$parsed || !isset($parsed['path'])) {
-            throw new Dialog360Exception('媒体下载URL无效');
-        }
-        $path = $parsed['path'] . (isset($parsed['query']) ? ('?' . $parsed['query']) : '');
-
-        // 通过相对路径请求（自动带上 D360-API-KEY 头）
-        $response = $this->httpClient->get($path);
-        $content = $response->getBody()->getContents();
-
-        return (bool)file_put_contents($savePath, $content);
+        return $this->media()->downloadByUrl($downloadUrl, $savePath);
     }
 
     /**
      * 删除媒体文件（Cloud API: DELETE /{media-id}）
-     * @param string $mediaId
-     * @return bool
+     *
      * @throws Dialog360Exception
+     * @deprecated 请使用 $client->media()->delete($mediaId)
      */
     public function deleteMedia(string $mediaId): bool
     {
-        try {
-            $response = $this->httpClient->delete("/{$mediaId}");
-            return $response->getStatusCode() === 200;
-        } catch (RequestException $e) {
-            throw new Dialog360Exception('删除媒体文件失败: ' . $e->getMessage(), 0, $e);
-        } catch (GuzzleException $e) {
-            throw new Dialog360Exception('网络请求失败: ' . $e->getMessage(), 0, $e);
-        }
+        return $this->media()->delete($mediaId);
     }
 
     /**
      * 下载媒体文件（Cloud API 两步：先取URL，再通过 v2 根域下载）
+     *
+     * @deprecated 请使用 $client->media()->download($mediaId, $savePath)
      */
-    public function downloadMedia(string $mediaId, string $savePath = null): string
+    public function downloadMedia(string $mediaId, ?string $savePath = null): string
     {
-        try {
-            $mediaInfo = $this->getMediaInfo($mediaId);
-            $downloadUrl = $mediaInfo->getUrl();
-
-            // Cloud API 指南：将 lookaside 主机替换为 waba-v2 根域后面的路径
-            $parsed = parse_url($downloadUrl);
-            if (!$parsed || !isset($parsed['path'])) {
-                throw new Dialog360Exception('媒体下载URL无效');
-            }
-            $path = $parsed['path'] . (isset($parsed['query']) ? ('?' . $parsed['query']) : '');
-
-            // 通过相对路径请求（自动带上 D360-API-KEY 头）
-            $response = $this->httpClient->get($path);
-            $content = $response->getBody()->getContents();
-
-            if ($savePath) {
-                file_put_contents($savePath, $content);
-            }
-
-            return $content;
-        } catch (RequestException $e) {
-            throw new Dialog360Exception('下载媒体文件失败: ' . $e->getMessage(), 0, $e);
-        } catch (GuzzleException $e) {
-            throw new Dialog360Exception('网络请求失败: ' . $e->getMessage(), 0, $e);
-        }
+        return $this->media()->download($mediaId, $savePath);
     }
 
     /**
      * 获取电话号码信息（Cloud API 暂无对应Messaging端点）
+     *
+     * @deprecated Cloud API 暂不支持，请使用 Meta Graph API 或 360dialog Hub
      */
     public function getPhoneNumberInfo(): array
     {
@@ -295,274 +217,67 @@ class Dialog360Client
 
     /**
      * 获取可用的模板（Cloud API 暂无 Messaging 端点）
+     *
+     * @deprecated 请使用 $client->templates()->list()
      */
     public function getTemplates(array $filters = [], string $sort = '', int $offset = 0, int $limit = 1000): TemplateMessageResponse
     {
-
-        $query = [
-            'offset' => $offset,
-            'limit' => $limit
-        ];
-        if ($filters) {
-            $query['filters'] = json_encode($filters);
-        }
-        if ($sort) {
-            $query['sort'] = $sort;
-        }
-
-        try {
-            $response = $this->httpClient->get("/v1/configs/templates", [
-                'query' => $query
-            ]);
-            $data = json_decode($response->getBody()->getContents(), true);
-            return new TemplateMessageResponse($data);
-        } catch (RequestException $e) {
-            throw new Dialog360Exception('获取媒体信息失败: ' . $e->getMessage(), 0, $e);
-        } catch (GuzzleException $e) {
-            throw new Dialog360Exception('网络请求失败: ' . $e->getMessage(), 0, $e);
-        }
+        return $this->templates()->list($filters, $sort, $offset, $limit);
     }
 
     /**
      * 获取API密钥信息（Cloud API 暂无 Messaging 端点）
+     *
+     * @deprecated Cloud API 暂不支持，请在 360dialog Hub 查看
      */
     public function getApiKeyInfo(): array
     {
         throw new Dialog360Exception('Cloud API 暂不支持通过 Messaging API 获取API密钥信息，请在 360dialog Hub 查看。');
     }
 
-//    public function setSandboxWebhookUrl(string $url)
-//    {
-//        $payload = [
-//            'url' => $url,
-//        ];
-//
-//        $attempts = 0;
-//        $lastException = null;
-//var_dump($payload);
-//var_dump($this->httpClient);
-//die();
-//        while ($attempts < $this->retryAttempts) {
-//            try {
-//                $response = $this->httpClient->post("/v1/configs/webhook", [
-//                    'json' => $payload
-//                ]);
-//
-//                $data = json_decode($response->getBody()->getContents(), true);
-//                var_dump($data);
-////                return new MessageResponse($data);
-//die();
-//            } catch (RequestException $e) {
-//                $lastException = $e;
-//                $attempts++;
-//
-//                if ($attempts >= $this->retryAttempts) {
-//                    break;
-//                }
-//
-//                // 等待一段时间后重试
-//                sleep(pow(2, $attempts));
-//            } catch (GuzzleException $e) {
-//                throw new Dialog360Exception('网络请求失败: ' . $e->getMessage(), 0, $e);
-//            }
-//        }
-//
-//        throw new Dialog360Exception(
-//            '发送消息失败，已重试' . $this->retryAttempts . '次: ' . $lastException->getMessage(),
-//            0,
-//            $lastException
-//        );
-//    }
-
     /**
      * 获取电话号码Webhook URL（Cloud API: GET /v1/configs/webhook）
-     * @return PhoneNumberWebhookResponse
+     *
      * @throws Dialog360Exception
+     * @deprecated 请使用 $client->webhook()->getUrl()
      */
     public function getWebhookUrl(): PhoneNumberWebhookResponse
     {
-        try {
-            $response = $this->httpClient->get("/v1/configs/webhook");
-            $data = json_decode($response->getBody()->getContents(), true);
-            return new PhoneNumberWebhookResponse($data);
-        } catch (RequestException $e) {
-            throw new Dialog360Exception('获取电话号码Webhook URL: ' . $e->getMessage(), 0, $e);
-        } catch (GuzzleException $e) {
-            throw new Dialog360Exception('网络请求失败: ' . $e->getMessage(), 0, $e);
-        }
-    }
-
-    public function setWebhookUrl($webhook_url): PhoneNumberWebhookResponse
-    {
-        $payload = [
-            'url' => $webhook_url
-        ];
-
-        $attempts = 0;
-        $lastException = null;
-
-        while ($attempts < $this->retryAttempts) {
-            try {
-                $response = $this->httpClient->post("/v1/configs/webhook", [
-                    'json' => $payload
-                ]);
-
-                $data = json_decode($response->getBody()->getContents(), true);
-                return new PhoneNumberWebhookResponse($data);
-
-            } catch (RequestException $e) {
-                $lastException = $e;
-                $attempts++;
-
-                if ($attempts >= $this->retryAttempts) {
-                    break;
-                }
-                // 等待一段时间后重试
-                sleep(pow(2, $attempts));
-            } catch (GuzzleException $e) {
-                throw new Dialog360Exception('网络请求失败: ' . $e->getMessage(), 0, $e);
-            }
-        }
-
-        throw new Dialog360Exception(
-            '发送消息失败，已重试' . $this->retryAttempts . '次: ' . $lastException->getMessage(),
-            0,
-            $lastException
-        );
-
-    }
-
-    public function getWabaWebhookUrl(): WabaWebhookResponse
-    {
-        try {
-            $response = $this->httpClient->get("/waba_webhook");
-            $data = json_decode($response->getBody()->getContents(), true);
-            return new WabaWebhookResponse($data);
-        } catch (RequestException $e) {
-            throw new Dialog360Exception('获取媒体信息失败: ' . $e->getMessage(), 0, $e);
-        } catch (GuzzleException $e) {
-            throw new Dialog360Exception('网络请求失败: ' . $e->getMessage(), 0, $e);
-        }
-    }
-
-    public function setWabaWebhookUrl(string $webhook_url, array $headers = [], bool $override_all = false): SetWabaWebhookUrlResponse
-    {
-        $payload = [
-            'url' => $webhook_url,
-            'headers' => $headers,
-            'override_all' => $override_all
-        ];
-
-        $attempts = 0;
-        $lastException = null;
-
-        while ($attempts < $this->retryAttempts) {
-            try {
-                $response = $this->httpClient->post("/waba_webhook", [
-                    'json' => $payload
-                ]);
-
-                $data = json_decode($response->getBody()->getContents(), true);
-
-                //This message means that the Webhook URL will be set within the next 15-20 seconds. Please confirm by fetching the current webhook URL before messaging.
-                return new SetWabaWebhookUrlResponse($data);
-
-            } catch (RequestException $e) {
-                $lastException = $e;
-                $attempts++;
-
-                if ($attempts >= $this->retryAttempts) {
-                    break;
-                }
-                // 等待一段时间后重试
-                sleep(pow(2, $attempts));
-            } catch (GuzzleException $e) {
-                throw new Dialog360Exception('网络请求失败: ' . $e->getMessage(), 0, $e);
-            }
-        }
-
-        throw new Dialog360Exception(
-            '发送消息失败，已重试' . $this->retryAttempts . '次: ' . $lastException->getMessage(),
-            0,
-            $lastException
-        );
-
+        return $this->webhook()->getUrl();
     }
 
     /**
-     * 验证媒体文件
-     * @param string $filePath
-     * @param string $mimeType
+     * 设置电话号码Webhook URL（Cloud API: POST /v1/configs/webhook）
+     *
+     * @param string $webhook_url
      * @throws Dialog360Exception
+     * @deprecated 请使用 $client->webhook()->setUrl($webhook_url)
      */
-    private function validateMediaFile(string $filePath, string $mimeType): void
+    public function setWebhookUrl($webhook_url): PhoneNumberWebhookResponse
     {
-        $fileSize = filesize($filePath);
+        return $this->webhook()->setUrl((string) $webhook_url);
+    }
 
-        // 根据文档定义的文件大小限制
-        $sizeLimits = [
-            'audio' => 16 * 1024 * 1024, // 16MB
-            'image' => 5 * 1024 * 1024,  // 5MB
-            'video' => 16 * 1024 * 1024, // 16MB
-            'document' => 100 * 1024 * 1024, // 100MB
-            'sticker' => 500 * 1024, // 500KB (动画贴纸)
-        ];
+    /**
+     * 获取WABA级Webhook配置（Cloud API: GET /waba_webhook）
+     *
+     * @throws Dialog360Exception
+     * @deprecated 请使用 $client->webhook()->getWabaUrl()
+     */
+    public function getWabaWebhookUrl(): WabaWebhookResponse
+    {
+        return $this->webhook()->getWabaUrl();
+    }
 
-        // 检查文件大小
-        if ($fileSize > 100 * 1024 * 1024) { // 最大100MB
-            throw new Dialog360Exception('文件大小超过100MB限制');
-        }
-
-        // 根据MIME类型检查特定限制
-        if (strpos($mimeType, 'audio/') === 0 && $fileSize > $sizeLimits['audio']) {
-            throw new Dialog360Exception('音频文件大小超过16MB限制');
-        }
-
-        if (strpos($mimeType, 'image/') === 0) {
-            if ($mimeType === 'image/webp' && $fileSize > $sizeLimits['sticker']) {
-                throw new Dialog360Exception('贴纸文件大小超过500KB限制');
-            }
-            if ($mimeType !== 'image/webp' && $fileSize > $sizeLimits['image']) {
-                throw new Dialog360Exception('图片文件大小超过5MB限制');
-            }
-        }
-
-        if (strpos($mimeType, 'video/') === 0 && $fileSize > $sizeLimits['video']) {
-            throw new Dialog360Exception('视频文件大小超过16MB限制');
-        }
-
-        // 验证支持的MIME类型（支持带codecs参数的格式）
-        $supportedTypes = [
-            // 音频
-            'audio/aac', 'audio/amr', 'audio/mpeg', 'audio/mp4', 'audio/ogg',
-            'audio/ogg; codecs=opus', 'audio/ogg; codecs=vorbis',
-            // 图片
-            'image/jpeg', 'image/png', 'image/webp',
-            // 视频
-            'video/mp4', 'video/3gp',
-            // 文档
-            'text/plain', 'application/pdf', 'application/vnd.ms-powerpoint',
-            'application/msword', 'application/vnd.ms-excel',
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        ];
-
-        // 检查基础MIME类型（忽略codecs参数）
-        $baseMimeType = explode(';', $mimeType)[0];
-        $isSupported = false;
-
-        foreach ($supportedTypes as $supportedType) {
-            $baseSupportedType = explode(';', $supportedType)[0];
-            if ($baseMimeType === $baseSupportedType) {
-                $isSupported = true;
-                break;
-            }
-        }
-
-        if (!$isSupported) {
-            throw new Dialog360Exception('不支持的媒体类型: ' . $mimeType);
-        }
+    /**
+     * 设置WABA级Webhook（Cloud API: POST /waba_webhook）
+     *
+     * @throws Dialog360Exception
+     * @deprecated 请使用 $client->webhook()->setWabaUrl(...)
+     */
+    public function setWabaWebhookUrl(string $webhook_url, array $headers = [], bool $override_all = false): SetWabaWebhookUrlResponse
+    {
+        return $this->webhook()->setWabaUrl($webhook_url, $headers, $override_all);
     }
 
     /**
@@ -578,4 +293,4 @@ class Dialog360Client
             'retryAttempts' => $this->retryAttempts
         ];
     }
-} 
+}
