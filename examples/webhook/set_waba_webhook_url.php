@@ -20,7 +20,7 @@ $retryAttempts = (int)EnvironmentLoader::get('DIALOG360_RETRY_ATTEMPTS', 3);
 // 初始化客户端
 $client = new Dialog360Client($apiKey, $phoneNumberId, $baseUrl, $timeout, $retryAttempts);
 
-$webhook_url = 'https://whatsapp-360-dialog.prizmgz.com/webhook.php';
+$webhook_url = '';
 $headers = [
     'header1' => 'value1',
     'header2' => 'value2'
