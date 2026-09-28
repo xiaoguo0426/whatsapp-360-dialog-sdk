@@ -821,6 +821,341 @@ class Dialog360ClientTest extends TestCase
         $this->client->profile()->update(['websites' => ['https://example.com', '   ']]);
     }
 
+    public function testListGroups(): void
+    {
+        $this->mockJsonResponse(200, [
+            'data' => [
+                'groups' => [
+                    ['id' => 'gid-1', 'subject' => 'Support Group', 'created_at' => 1700000000],
+                    ['id' => 'gid-2', 'subject' => 'Sales Group', 'created_at' => 1700000100]
+                ]
+            ],
+            'paging' => [
+                'cursors' => ['after' => 'cursor-after', 'before' => 'cursor-before'],
+                'next' => 'https://waba-v2.360dialog.io/groups?after=cursor-after'
+            ]
+        ]);
+
+        $list = $this->client->groups()->list(30);
+
+        $this->assertCount(2, $list->getGroups());
+        $this->assertEquals('gid-1', $list->getGroups()[0]['id']);
+        $this->assertEquals('cursor-after', $list->getAfterCursor());
+        $this->assertEquals('cursor-before', $list->getBeforeCursor());
+        $this->assertTrue($list->hasNextPage());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('GET', $request->getMethod());
+        $this->assertEquals('/groups', $request->getUri()->getPath());
+        $this->assertEquals('limit=30', $request->getUri()->getQuery());
+    }
+
+    public function testListGroupsRejectsInvalidLimit(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('limit 必须在 1 到 1024 之间');
+
+        $this->client->groups()->list(0);
+    }
+
+    public function testCreateGroup(): void
+    {
+        $this->mockJsonResponse(200, ['id' => 'gid-new']);
+
+        $response = $this->client->groups()->create('Support Group', 'Customer support', true);
+
+        $this->assertEquals('gid-new', $response->getGroupId());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('POST', $request->getMethod());
+        $this->assertEquals('/groups', $request->getUri()->getPath());
+
+        $payload = $this->getLastRequestPayload();
+        $this->assertEquals('whatsapp', $payload['messaging_product']);
+        $this->assertEquals('Support Group', $payload['subject']);
+        $this->assertEquals('Customer support', $payload['description']);
+        $this->assertTrue($payload['join_approval_mode']);
+    }
+
+    public function testCreateGroupRequiresSubject(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('subject 不能为空');
+
+        $this->client->groups()->create('   ');
+    }
+
+    public function testGetGroupInfo(): void
+    {
+        $this->mockJsonResponse(200, [
+            'id' => 'gid-1',
+            'subject' => 'Support Group',
+            'description' => 'Customer support',
+            'creation_timestamp' => 1700000000,
+            'join_approval_mode' => true,
+            'messaging_product' => 'whatsapp',
+            'suspended' => false,
+            'total_participant_count' => 2,
+            'participants' => [
+                ['wa_id' => '1234567890'],
+                ['wa_id' => '9876543210']
+            ]
+        ]);
+
+        $info = $this->client->groups()->get('gid-1', ['subject', 'participants']);
+
+        $this->assertEquals('gid-1', $info->getGroupId());
+        $this->assertEquals('Support Group', $info->getSubject());
+        $this->assertEquals('Customer support', $info->getDescription());
+        $this->assertEquals(1700000000, $info->getCreationTimestamp());
+        $this->assertTrue($info->getJoinApprovalMode());
+        $this->assertFalse($info->isSuspended());
+        $this->assertEquals(2, $info->getTotalParticipantCount());
+        $this->assertEquals(['1234567890', '9876543210'], $info->getParticipantWaIds());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('GET', $request->getMethod());
+        $this->assertEquals('/groups/gid-1', $request->getUri()->getPath());
+        $this->assertEquals('fields=subject%2Cparticipants', $request->getUri()->getQuery());
+    }
+
+    public function testUpdateGroupWithJson(): void
+    {
+        $this->mockJsonResponse(200, ['success' => true]);
+
+        $response = $this->client->groups()->update('gid-1', [
+            'subject' => 'New Subject',
+            'description' => 'New description',
+        ]);
+
+        $this->assertTrue($response->isSuccess());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('POST', $request->getMethod());
+        $this->assertEquals('/groups/gid-1', $request->getUri()->getPath());
+
+        $payload = $this->getLastRequestPayload();
+        $this->assertEquals('whatsapp', $payload['messaging_product']);
+        $this->assertEquals('New Subject', $payload['subject']);
+        $this->assertEquals('New description', $payload['description']);
+    }
+
+    public function testUpdateGroupWithProfilePictureUsesMultipart(): void
+    {
+        $this->mockJsonResponse(200, ['success' => true]);
+
+        $pictureFile = tempnam(sys_get_temp_dir(), 'avatar');
+        file_put_contents($pictureFile, 'fake-image-bytes');
+
+        try {
+            $response = $this->client->groups()->update('gid-1', [
+                'subject' => 'New Subject',
+                'profile_picture_file' => $pictureFile,
+            ]);
+
+            $this->assertTrue($response->isSuccess());
+
+            $request = $this->getLastCapturedRequest();
+            $this->assertEquals('POST', $request->getMethod());
+            $this->assertEquals('/groups/gid-1', $request->getUri()->getPath());
+            $this->assertStringContainsString('multipart/form-data', $request->getHeaderLine('Content-Type'));
+
+            $body = (string) $request->getBody();
+            $this->assertStringContainsString('name="profile_picture_file"', $body);
+            $this->assertStringContainsString(basename($pictureFile), $body);
+            $this->assertStringContainsString('name="subject"', $body);
+        } finally {
+            unlink($pictureFile);
+        }
+    }
+
+    public function testUpdateGroupRejectsUnknownField(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('含未知字段"members"');
+
+        $this->client->groups()->update('gid-1', ['members' => ['1234567890']]);
+    }
+
+    public function testDeleteGroup(): void
+    {
+        $this->mockJsonResponse(200, ['success' => true]);
+
+        $response = $this->client->groups()->delete('gid-1');
+
+        $this->assertTrue($response->isSuccess());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('DELETE', $request->getMethod());
+        $this->assertEquals('/groups/gid-1', $request->getUri()->getPath());
+    }
+
+    public function testGetInviteLink(): void
+    {
+        $this->mockJsonResponse(200, [
+            'invite_link' => 'https://chat.whatsapp.com/abc123',
+            'messaging_product' => 'whatsapp'
+        ]);
+
+        $response = $this->client->groups()->getInviteLink('gid-1');
+
+        $this->assertEquals('https://chat.whatsapp.com/abc123', $response->getInviteLink());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('GET', $request->getMethod());
+        $this->assertEquals('/groups/gid-1/invite_link', $request->getUri()->getPath());
+    }
+
+    public function testResetInviteLink(): void
+    {
+        $this->mockJsonResponse(200, [
+            'invite_link' => 'https://chat.whatsapp.com/new-link',
+            'messaging_product' => 'whatsapp'
+        ]);
+
+        $response = $this->client->groups()->resetInviteLink('gid-1');
+
+        $this->assertEquals('https://chat.whatsapp.com/new-link', $response->getInviteLink());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('POST', $request->getMethod());
+        $this->assertEquals('/groups/gid-1/invite_link', $request->getUri()->getPath());
+
+        $payload = $this->getLastRequestPayload();
+        $this->assertEquals('whatsapp', $payload['messaging_product']);
+    }
+
+    public function testListJoinRequests(): void
+    {
+        $this->mockJsonResponse(200, [
+            'data' => [
+                ['join_request_id' => 'jr-1', 'wa_id' => '1234567890', 'creation_timestamp' => 1700000000],
+                ['join_request_id' => 'jr-2', 'wa_id' => '9876543210', 'creation_timestamp' => 1700000100]
+            ],
+            'paging' => [
+                'cursors' => ['after' => 'cursor-after']
+            ]
+        ]);
+
+        $list = $this->client->groups()->listJoinRequests('gid-1', 10);
+
+        $this->assertCount(2, $list->getJoinRequests());
+        $this->assertEquals('jr-1', $list->getJoinRequests()[0]['join_request_id']);
+        $this->assertEquals('cursor-after', $list->getAfterCursor());
+        $this->assertFalse($list->hasNextPage());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('GET', $request->getMethod());
+        $this->assertEquals('/groups/gid-1/join_requests', $request->getUri()->getPath());
+        $this->assertEquals('limit=10', $request->getUri()->getQuery());
+    }
+
+    public function testApproveJoinRequests(): void
+    {
+        $this->mockJsonResponse(200, [
+            'approved_join_requests' => ['jr-1', 'jr-2'],
+            'rejected_join_requests' => [],
+            'failed_join_requests' => [],
+            'messaging_product' => 'whatsapp'
+        ]);
+
+        $response = $this->client->groups()->approveJoinRequests('gid-1', ['jr-1', 'jr-2']);
+
+        $this->assertTrue($response->isSuccess());
+        $this->assertEquals(['jr-1', 'jr-2'], $response->getApprovedJoinRequests());
+        $this->assertSame([], $response->getFailedJoinRequests());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('POST', $request->getMethod());
+        $this->assertEquals('/groups/gid-1/join_requests', $request->getUri()->getPath());
+
+        $payload = $this->getLastRequestPayload();
+        $this->assertEquals(['jr-1', 'jr-2'], $payload['join_requests']);
+    }
+
+    public function testApproveJoinRequestsWithPartialFailure(): void
+    {
+        $this->mockJsonResponse(200, [
+            'approved_join_requests' => ['jr-1'],
+            'failed_join_requests' => [
+                [
+                    'join_request_id' => 'jr-bad',
+                    'errors' => [
+                        ['code' => 131000, 'message' => 'Request not found']
+                    ]
+                ]
+            ],
+            'messaging_product' => 'whatsapp'
+        ]);
+
+        $response = $this->client->groups()->approveJoinRequests('gid-1', ['jr-1', 'jr-bad']);
+
+        $this->assertFalse($response->isSuccess());
+        $this->assertCount(1, $response->getApprovedJoinRequests());
+        $this->assertEquals('jr-bad', $response->getFailedJoinRequests()[0]['join_request_id']);
+        $this->assertEquals('Request not found', $response->getFailedJoinRequests()[0]['errors'][0]['message']);
+    }
+
+    public function testRejectJoinRequests(): void
+    {
+        $this->mockJsonResponse(200, [
+            'rejected_join_requests' => ['jr-2'],
+            'failed_join_requests' => [],
+            'messaging_product' => 'whatsapp'
+        ]);
+
+        $response = $this->client->groups()->rejectJoinRequests('gid-1', ['jr-2']);
+
+        $this->assertTrue($response->isSuccess());
+        $this->assertEquals(['jr-2'], $response->getRejectedJoinRequests());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('DELETE', $request->getMethod());
+        $this->assertEquals('/groups/gid-1/join_requests', $request->getUri()->getPath());
+    }
+
+    public function testJoinRequestsRequireIds(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('joinRequestIds 不能为空');
+
+        $this->client->groups()->approveJoinRequests('gid-1', []);
+    }
+
+    public function testRemoveParticipants(): void
+    {
+        $this->mockJsonResponse(200, ['success' => true]);
+
+        $response = $this->client->groups()->removeParticipants('gid-1', ['+1234567890', '+9876543210']);
+
+        $this->assertTrue($response->isSuccess());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('DELETE', $request->getMethod());
+        $this->assertEquals('/groups/gid-1/participants', $request->getUri()->getPath());
+
+        $payload = $this->getLastRequestPayload();
+        $this->assertEquals('whatsapp', $payload['messaging_product']);
+        $this->assertEquals('+1234567890', $payload['participants'][0]['user']);
+        $this->assertCount(2, $payload['participants']);
+    }
+
+    public function testRemoveParticipantsRejectsOverMax(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('单次最多移除 8 名成员');
+
+        $this->client->groups()->removeParticipants('gid-1', array_fill(0, 9, '+1234567890'));
+    }
+
+    public function testRemoveParticipantsRejectsEmptyUsers(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('users 不能为空');
+
+        $this->client->groups()->removeParticipants('gid-1', []);
+    }
+
     public function testGetMediaInfo(): void
     {
         // Cloud API v2 媒体响应结构

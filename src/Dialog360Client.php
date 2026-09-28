@@ -4,6 +4,7 @@ namespace Dialog360;
 
 use Dialog360\Api\BlockUsersApi;
 use Dialog360\Api\ConversationalComponentsApi;
+use Dialog360\Api\GroupApi;
 use Dialog360\Api\HealthApi;
 use Dialog360\Api\MediaApi;
 use Dialog360\Api\MessagesApi;
@@ -35,6 +36,7 @@ use GuzzleHttp\HandlerStack;
  *   $client->conversationalComponents()->get();
  *   $client->blockUsers()->block(['1234567890']);
  *   $client->profile()->get(['about', 'email']);
+ *   $client->groups()->create('Group subject');
  *
  * 旧的扁平方法（sendMessage/uploadMedia/...）保留为向后兼容的一行委托，已标注 @deprecated。
  */
@@ -55,6 +57,7 @@ class Dialog360Client
     private ?ConversationalComponentsApi $conversationalComponentsApi = null;
     private ?BlockUsersApi $blockUsersApi = null;
     private ?ProfileApi $profileApi = null;
+    private ?GroupApi $groupApi = null;
 
     public function __construct(
         string        $apiKey,
@@ -151,6 +154,14 @@ class Dialog360Client
     public function profile(): ProfileApi
     {
         return $this->profileApi ??= new ProfileApi($this->connector);
+    }
+
+    /**
+     * 群组 API 域（建群 / 管理 / 成员与加群请求，/groups）
+     */
+    public function groups(): GroupApi
+    {
+        return $this->groupApi ??= new GroupApi($this->connector);
     }
 
     /** ===== 向后兼容层（@deprecated，委托实现） ===== */
