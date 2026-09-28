@@ -1501,6 +1501,302 @@ class Dialog360ClientTest extends TestCase
         $this->client->marketing()->sendEvents('dataset-1', array_fill(0, 1001, ['event_name' => 'Purchase']));
     }
 
+    public function testListMessageTemplates(): void
+    {
+        $this->mockJsonResponse(200, [
+            'data' => [
+                ['id' => 'tpl-1', 'name' => 'promo', 'status' => 'APPROVED', 'category' => 'MARKETING'],
+                ['id' => 'tpl-2', 'name' => 'otp', 'status' => 'PENDING', 'category' => 'AUTHENTICATION']
+            ],
+            'paging' => [
+                'cursors' => ['after' => 'cursor-after', 'before' => 'cursor-before'],
+                'next' => 'https://waba-v2.360dialog.io/message_templates?after=cursor-after'
+            ]
+        ]);
+
+        $list = $this->client->templates()->listMessageTemplates(20, null, null, ['name', 'status']);
+
+        $this->assertCount(2, $list->getTemplates());
+        $this->assertEquals('promo', $list->getTemplates()[0]['name']);
+        $this->assertEquals('cursor-after', $list->getAfterCursor());
+        $this->assertTrue($list->hasNextPage());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('GET', $request->getMethod());
+        $this->assertEquals('/message_templates', $request->getUri()->getPath());
+        $this->assertEquals('limit=20&fields=name%2Cstatus', $request->getUri()->getQuery());
+    }
+
+    public function testGetTemplateLibrary(): void
+    {
+        $this->mockJsonResponse(200, [
+            'data' => [
+                [
+                    'name' => 'order_update',
+                    'category' => 'UTILITY',
+                    'language' => 'en_US',
+                    'body' => 'Your order {{1}} has shipped',
+                    'topic' => 'ORDER_STATUS'
+                ]
+            ],
+            'paging' => ['cursors' => ['after' => 'cursor-after']]
+        ]);
+
+        $list = $this->client->templates()->getTemplateLibrary();
+
+        $this->assertCount(1, $list->getTemplates());
+        $this->assertEquals('order_update', $list->getTemplates()[0]['name']);
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('GET', $request->getMethod());
+        $this->assertEquals('/message_template_library', $request->getUri()->getPath());
+    }
+
+    public function testGetMessageTemplate(): void
+    {
+        $this->mockJsonResponse(200, [
+            'id' => 'tpl-1',
+            'name' => 'promo',
+            'category' => 'MARKETING',
+            'language' => 'en_US',
+            'status' => 'APPROVED',
+            'components' => [
+                ['type' => 'BODY', 'text' => 'Hello {{1}}']
+            ]
+        ]);
+
+        $template = $this->client->templates()->get('tpl-1', ['name', 'status', 'components']);
+
+        $this->assertEquals('tpl-1', $template->getTemplateId());
+        $this->assertEquals('promo', $template->getName());
+        $this->assertEquals('MARKETING', $template->getCategory());
+        $this->assertEquals('en_US', $template->getLanguage());
+        $this->assertEquals('APPROVED', $template->getStatus());
+        $this->assertCount(1, $template->getComponents());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('GET', $request->getMethod());
+        $this->assertEquals('/message_templates/tpl-1', $request->getUri()->getPath());
+        $this->assertStringContainsString('fields=name', $request->getUri()->getQuery());
+    }
+
+    public function testCreateMessageTemplate(): void
+    {
+        $this->mockJsonResponse(200, [
+            'id' => 'tpl-new',
+            'status' => 'PENDING',
+            'category' => 'MARKETING'
+        ]);
+
+        $response = $this->client->templates()->create(
+            'promo',
+            'en_US',
+            'MARKETING',
+            [
+                ['type' => 'BODY', 'text' => 'Hello {{1}}, enjoy 20% off!'],
+            ],
+            ['allow_category_change' => true]
+        );
+
+        $this->assertEquals('tpl-new', $response->getTemplateId());
+        $this->assertEquals('PENDING', $response->getStatus());
+        $this->assertEquals('MARKETING', $response->getCategory());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('POST', $request->getMethod());
+        $this->assertEquals('/message_templates', $request->getUri()->getPath());
+
+        $payload = $this->getLastRequestPayload();
+        $this->assertEquals('promo', $payload['name']);
+        $this->assertEquals('en_US', $payload['language']);
+        $this->assertEquals('MARKETING', $payload['category']);
+        $this->assertEquals('Hello {{1}}, enjoy 20% off!', $payload['components'][0]['text']);
+        $this->assertTrue($payload['allow_category_change']);
+    }
+
+    public function testCreateMessageTemplateRequiresComponents(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('components 不能为空');
+
+        $this->client->templates()->create('promo', 'en_US', 'MARKETING', []);
+    }
+
+    public function testCreateMessageTemplateRejectsUnknownOption(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('含未知字段"send_now"');
+
+        $this->client->templates()->create(
+            'promo',
+            'en_US',
+            'MARKETING',
+            [['type' => 'BODY', 'text' => 'Hi']],
+            ['send_now' => true]
+        );
+    }
+
+    public function testUpdateMessageTemplate(): void
+    {
+        $this->mockJsonResponse(200, ['success' => true]);
+
+        $response = $this->client->templates()->update('tpl-1', [
+            'category' => 'UTILITY',
+            'components' => [['type' => 'BODY', 'text' => 'Updated text']],
+        ]);
+
+        $this->assertTrue($response->isSuccess());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('POST', $request->getMethod());
+        $this->assertEquals('/message_templates/tpl-1', $request->getUri()->getPath());
+
+        $payload = $this->getLastRequestPayload();
+        $this->assertEquals('UTILITY', $payload['category']);
+        $this->assertEquals('Updated text', $payload['components'][0]['text']);
+    }
+
+    public function testUpdateMessageTemplateRejectsUnknownField(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('含未知字段"name"');
+
+        $this->client->templates()->update('tpl-1', ['name' => 'new-name']);
+    }
+
+    public function testDeleteTemplateByName(): void
+    {
+        $this->mockJsonResponse(200, ['success' => true]);
+
+        $response = $this->client->templates()->deleteByName('promo');
+
+        $this->assertTrue($response->isSuccess());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('DELETE', $request->getMethod());
+        $this->assertEquals('/message_templates', $request->getUri()->getPath());
+        $this->assertEquals('name=promo', $request->getUri()->getQuery());
+    }
+
+    public function testDeleteTemplateById(): void
+    {
+        $this->mockJsonResponse(200, ['success' => true]);
+
+        $response = $this->client->templates()->deleteById('tpl-1');
+
+        $this->assertTrue($response->isSuccess());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('DELETE', $request->getMethod());
+        $this->assertEquals('hsm_id=tpl-1', $request->getUri()->getQuery());
+    }
+
+    public function testDeleteTemplatesByIds(): void
+    {
+        $this->mockJsonResponse(200, ['success' => true]);
+
+        $response = $this->client->templates()->deleteByIds(['tpl-1', 'tpl-2']);
+
+        $this->assertTrue($response->isSuccess());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('DELETE', $request->getMethod());
+        $this->assertEquals('hsm_ids=' . rawurlencode((string) json_encode(['tpl-1', 'tpl-2'])), $request->getUri()->getQuery());
+    }
+
+    public function testArchiveTemplates(): void
+    {
+        $this->mockJsonResponse(200, [
+            'archived_templates' => ['tpl-1', 'tpl-2'],
+            'failed_templates' => []
+        ]);
+
+        $response = $this->client->templates()->archive(['tpl-1', 'tpl-2']);
+
+        $this->assertTrue($response->isSuccess());
+        $this->assertEquals(['tpl-1', 'tpl-2'], $response->getProcessedTemplates());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('POST', $request->getMethod());
+        $this->assertEquals('/message_templates/archive', $request->getUri()->getPath());
+
+        $payload = $this->getLastRequestPayload();
+        $this->assertEquals(['tpl-1', 'tpl-2'], $payload['hsm_ids']);
+    }
+
+    public function testArchiveTemplatesWithFailures(): void
+    {
+        $this->mockJsonResponse(200, [
+            'archived_templates' => ['tpl-1'],
+            'failed_templates' => [
+                'tpl-2' => ['error' => 'Template not in ARCHIVED-able state']
+            ]
+        ]);
+
+        $response = $this->client->templates()->archive(['tpl-1', 'tpl-2']);
+
+        $this->assertFalse($response->isSuccess());
+        $this->assertEquals(['tpl-1'], $response->getProcessedTemplates());
+        $this->assertEquals('Template not in ARCHIVED-able state', $response->getFailedTemplates()['tpl-2']['error']);
+    }
+
+    public function testUnarchiveTemplates(): void
+    {
+        $this->mockJsonResponse(200, [
+            'unarchived_templates' => ['tpl-1'],
+            'failed_templates' => []
+        ]);
+
+        $response = $this->client->templates()->unarchive(['tpl-1']);
+
+        $this->assertTrue($response->isSuccess());
+        $this->assertEquals(['tpl-1'], $response->getProcessedTemplates());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('POST', $request->getMethod());
+        $this->assertEquals('/message_templates/unarchive', $request->getUri()->getPath());
+    }
+
+    public function testArchiveRejectsOverMax(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('单次最多处理 100 个模板');
+
+        $this->client->templates()->archive(array_fill(0, 101, 'tpl-1'));
+    }
+
+    public function testCompareTemplates(): void
+    {
+        $this->mockJsonResponse(200, [
+            'data' => [
+                [
+                    'metric' => 'BLOCK_RATE',
+                    'type' => 'RELATIVE',
+                    'number_values' => [['key' => 'tpl-2', 'value' => 0.5]]
+                ],
+                [
+                    'metric' => 'TOP_BLOCK_REASON',
+                    'type' => 'STRING_VALUES',
+                    'string_values' => [['key' => 'tpl-2', 'value' => 'OTHER']]
+                ]
+            ]
+        ]);
+
+        $response = $this->client->templates()->compare('tpl-1', ['tpl-2'], 1700000000, 1700600000);
+
+        $this->assertCount(2, $response->getMetrics());
+        $this->assertEquals('BLOCK_RATE', $response->getMetrics()[0]['metric']);
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('GET', $request->getMethod());
+        $this->assertEquals('/message_templates/tpl-1/compare', $request->getUri()->getPath());
+
+        $query = $request->getUri()->getQuery();
+        $this->assertStringContainsString('template_ids=' . rawurlencode((string) json_encode(['tpl-2'])), $query);
+        $this->assertStringContainsString('start=1700000000', $query);
+        $this->assertStringContainsString('end=1700600000', $query);
+    }
+
     public function testGetMediaInfo(): void
     {
         // Cloud API v2 媒体响应结构
