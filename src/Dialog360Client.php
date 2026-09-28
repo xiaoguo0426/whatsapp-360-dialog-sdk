@@ -2,9 +2,14 @@
 
 namespace Dialog360;
 
+use Dialog360\Api\BlockUsersApi;
+use Dialog360\Api\ConversationalComponentsApi;
+use Dialog360\Api\GroupApi;
 use Dialog360\Api\HealthApi;
 use Dialog360\Api\MediaApi;
 use Dialog360\Api\MessagesApi;
+use Dialog360\Api\MarketingApi;
+use Dialog360\Api\ProfileApi;
 use Dialog360\Api\TemplateApi;
 use Dialog360\Api\WebhookApi;
 use Dialog360\Exception\Dialog360Exception;
@@ -29,6 +34,11 @@ use GuzzleHttp\HandlerStack;
  *   $client->webhook()->setUrl('https://...');
  *   $client->templates()->list();
  *   $client->health()->status();
+ *   $client->conversationalComponents()->get();
+ *   $client->blockUsers()->block(['1234567890']);
+ *   $client->profile()->get(['about', 'email']);
+ *   $client->groups()->create('Group subject');
+ *   $client->marketing()->send('1234567890', ['name' => 'promo', 'language' => 'en']);
  *
  * 旧的扁平方法（sendMessage/uploadMedia/...）保留为向后兼容的一行委托，已标注 @deprecated。
  */
@@ -46,6 +56,11 @@ class Dialog360Client
     private ?WebhookApi $webhookApi = null;
     private ?TemplateApi $templateApi = null;
     private ?HealthApi $healthApi = null;
+    private ?ConversationalComponentsApi $conversationalComponentsApi = null;
+    private ?BlockUsersApi $blockUsersApi = null;
+    private ?ProfileApi $profileApi = null;
+    private ?GroupApi $groupApi = null;
+    private ?MarketingApi $marketingApi = null;
 
     public function __construct(
         string        $apiKey,
@@ -118,6 +133,46 @@ class Dialog360Client
     public function health(): HealthApi
     {
         return $this->healthApi ??= new HealthApi($this->connector);
+    }
+
+    /**
+     * Conversational Components API 域（欢迎消息 / 命令 / 提示语，/conversational_automation）
+     */
+    public function conversationalComponents(): ConversationalComponentsApi
+    {
+        return $this->conversationalComponentsApi ??= new ConversationalComponentsApi($this->connector);
+    }
+
+    /**
+     * 拉黑用户 API 域（查询 / 拉黑 / 解除拉黑，/block_users）
+     */
+    public function blockUsers(): BlockUsersApi
+    {
+        return $this->blockUsersApi ??= new BlockUsersApi($this->connector);
+    }
+
+    /**
+     * 主页资料 API 域（查询 / 更新 WhatsApp Business Profile，/whatsapp_business_profile）
+     */
+    public function profile(): ProfileApi
+    {
+        return $this->profileApi ??= new ProfileApi($this->connector);
+    }
+
+    /**
+     * 群组 API 域（建群 / 管理 / 成员与加群请求，/groups）
+     */
+    public function groups(): GroupApi
+    {
+        return $this->groupApi ??= new GroupApi($this->connector);
+    }
+
+    /**
+     * 营销消息 API 域（发送 / 数据集 / 模板 / 触达估算 / 分析，/marketing_messages 与 /marketing/*）
+     */
+    public function marketing(): MarketingApi
+    {
+        return $this->marketingApi ??= new MarketingApi($this->connector);
     }
 
     /** ===== 向后兼容层（@deprecated，委托实现） ===== */
