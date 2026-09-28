@@ -714,6 +714,113 @@ class Dialog360ClientTest extends TestCase
         $this->client->blockUsers()->block(['+1234567890', '   ']);
     }
 
+    public function testGetBusinessProfile(): void
+    {
+        $this->mockJsonResponse(200, [
+            'data' => [
+                [
+                    'messaging_product' => 'whatsapp',
+                    'about' => 'Hi, we are here to help',
+                    'address' => 'Room 1201, Tower A, Hong Kong',
+                    'description' => 'An e-commerce business',
+                    'email' => 'support@example.com',
+                    'profile_picture_url' => 'https://example.com/avatar.jpg',
+                    'vertical' => 'RETAIL',
+                    'websites' => ['https://example.com', 'https://blog.example.com']
+                ]
+            ]
+        ]);
+
+        $profile = $this->client->profile()->get(['about', 'email', 'websites']);
+
+        $this->assertEquals('whatsapp', $profile->getMessagingProduct());
+        $this->assertEquals('Hi, we are here to help', $profile->getAbout());
+        $this->assertEquals('support@example.com', $profile->getEmail());
+        $this->assertEquals('RETAIL', $profile->getVertical());
+        $this->assertCount(2, $profile->getWebsites());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('GET', $request->getMethod());
+        $this->assertEquals('/whatsapp_business_profile', $request->getUri()->getPath());
+        $this->assertEquals('fields=about%2Cemail%2Cwebsites', $request->getUri()->getQuery());
+    }
+
+    public function testGetBusinessProfileDefaultFields(): void
+    {
+        $this->mockJsonResponse(200, [
+            'data' => [
+                ['messaging_product' => 'whatsapp', 'about' => 'Hi']
+            ]
+        ]);
+
+        $profile = $this->client->profile()->get();
+
+        $this->assertEquals('Hi', $profile->getAbout());
+        $this->assertEquals('', $profile->getVertical());
+
+        // 未指定 fields 时不带查询参数
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('', $request->getUri()->getQuery());
+    }
+
+    public function testGetBusinessProfileRejectsUnknownField(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('含未知字段"nickname"');
+
+        $this->client->profile()->get(['about', 'nickname']);
+    }
+
+    public function testUpdateBusinessProfile(): void
+    {
+        $this->mockJsonResponse(200, ['success' => true]);
+
+        $response = $this->client->profile()->update([
+            'about' => 'Hi, we are here to help',
+            'email' => 'support@example.com',
+            'vertical' => 'RETAIL',
+            'websites' => ['https://example.com'],
+        ]);
+
+        $this->assertTrue($response->isSuccess());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('POST', $request->getMethod());
+        $this->assertEquals('/whatsapp_business_profile', $request->getUri()->getPath());
+
+        $payload = $this->getLastRequestPayload();
+        $this->assertEquals('whatsapp', $payload['messaging_product']);
+        $this->assertEquals('Hi, we are here to help', $payload['about']);
+        $this->assertEquals('support@example.com', $payload['email']);
+        $this->assertEquals('RETAIL', $payload['vertical']);
+        $this->assertEquals(['https://example.com'], $payload['websites']);
+    }
+
+    public function testUpdateBusinessProfileRejectsUnknownField(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('含未知字段"profile_picture_url"');
+
+        // GET 返回的是 profile_picture_url，更新时应使用 profile_picture_handle
+        $this->client->profile()->update(['profile_picture_url' => 'https://example.com/avatar.jpg']);
+    }
+
+    public function testUpdateBusinessProfileRejectsInvalidVertical(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('vertical 取值"SHOPPING"不合法');
+
+        $this->client->profile()->update(['vertical' => 'SHOPPING']);
+    }
+
+    public function testUpdateBusinessProfileRejectsInvalidWebsites(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('websites[1] 必须为非空字符串');
+
+        $this->client->profile()->update(['websites' => ['https://example.com', '   ']]);
+    }
+
     public function testGetMediaInfo(): void
     {
         // Cloud API v2 媒体响应结构

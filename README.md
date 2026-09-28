@@ -83,6 +83,10 @@ $response = $client->conversationalComponents()->configure(
 $list = $client->blockUsers()->list(limit: 10);
 $response = $client->blockUsers()->block(['+1234567890']);
 $response = $client->blockUsers()->unblock(['+1234567890']);
+
+// 主页资料：查询 / 更新 WhatsApp Business Profile（/whatsapp_business_profile）
+$profile = $client->profile()->get(['about', 'email']);
+$response = $client->profile()->update(['about' => 'Hi!', 'vertical' => 'RETAIL']);
 ```
 
 旧的扁平方法（`sendMessage()`、`uploadMedia()`、`setWebhookUrl()` 等）仍然可用，已标注 `@deprecated`，内部一行委托到对应域方法，后续版本才会移除。
@@ -97,6 +101,7 @@ $response = $client->blockUsers()->unblock(['+1234567890']);
 - ✅ 发送交互式消息（按钮、列表）
 - ✅ Conversational Components（会话自动化：欢迎消息 / 命令 / 提示语）
 - ✅ 拉黑用户（查询 / 拉黑 / 解除拉黑）
+- ✅ 主页资料（WhatsApp Business Profile 查询 / 更新）
 - ✅ 健康检查（Cloud API）
 - ✅ 获取媒体文件
 - ✅ 错误处理和重试机制

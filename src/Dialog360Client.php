@@ -7,6 +7,7 @@ use Dialog360\Api\ConversationalComponentsApi;
 use Dialog360\Api\HealthApi;
 use Dialog360\Api\MediaApi;
 use Dialog360\Api\MessagesApi;
+use Dialog360\Api\ProfileApi;
 use Dialog360\Api\TemplateApi;
 use Dialog360\Api\WebhookApi;
 use Dialog360\Exception\Dialog360Exception;
@@ -33,6 +34,7 @@ use GuzzleHttp\HandlerStack;
  *   $client->health()->status();
  *   $client->conversationalComponents()->get();
  *   $client->blockUsers()->block(['1234567890']);
+ *   $client->profile()->get(['about', 'email']);
  *
  * 旧的扁平方法（sendMessage/uploadMedia/...）保留为向后兼容的一行委托，已标注 @deprecated。
  */
@@ -52,6 +54,7 @@ class Dialog360Client
     private ?HealthApi $healthApi = null;
     private ?ConversationalComponentsApi $conversationalComponentsApi = null;
     private ?BlockUsersApi $blockUsersApi = null;
+    private ?ProfileApi $profileApi = null;
 
     public function __construct(
         string        $apiKey,
@@ -140,6 +143,14 @@ class Dialog360Client
     public function blockUsers(): BlockUsersApi
     {
         return $this->blockUsersApi ??= new BlockUsersApi($this->connector);
+    }
+
+    /**
+     * 主页资料 API 域（查询 / 更新 WhatsApp Business Profile，/whatsapp_business_profile）
+     */
+    public function profile(): ProfileApi
+    {
+        return $this->profileApi ??= new ProfileApi($this->connector);
     }
 
     /** ===== 向后兼容层（@deprecated，委托实现） ===== */
