@@ -66,7 +66,16 @@ $client->webhook()->setWabaUrl('https://example.com/webhook', headers: [], overr
 $config = $client->webhook()->getWabaUrl();
 
 // 模板：查询模板列表
-$templates = $client->templates()->list();
+$templates = $client->templates()->list(); // 旧端点 /v1/configs/templates（已废弃）
+
+// 模板：完整生命周期（/message_templates）
+$list = $client->templates()->listMessageTemplates(limit: 25);
+$library = $client->templates()->getTemplateLibrary();
+$created = $client->templates()->create('promo', 'en_US', 'MARKETING', [['type' => 'BODY', 'text' => 'Hi {{1}}']]);
+$template = $client->templates()->get($created->getTemplateId());
+$client->templates()->update($created->getTemplateId(), ['category' => 'UTILITY']);
+$client->templates()->deleteByName('promo');
+$client->templates()->archive([$created->getTemplateId()]);
 
 // 健康状态
 $health = $client->health()->status();
@@ -117,6 +126,7 @@ $estimate = $client->marketing()->getReachEstimate(['geo_locations' => ['countri
 - ✅ 主页资料（WhatsApp Business Profile 查询 / 更新）
 - ✅ 群组（建群 / 详情 / 更新 / 删除 / 邀请链接 / 加群请求审批 / 移除成员）
 - ✅ 营销消息（发送 / 转化数据集 / 触达估算 / 模板与分析 / Conversions API 事件）
+- ✅ 模板管理（列表 / 模板库 / 创建 / 编辑 / 删除 / 归档恢复 / 效果对比）
 - ✅ 健康检查（Cloud API）
 - ✅ 获取媒体文件
 - ✅ 错误处理和重试机制
