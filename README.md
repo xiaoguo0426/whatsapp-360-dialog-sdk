@@ -95,6 +95,11 @@ $client->groups()->update($groupId, ['subject' => 'New subject']);
 $client->groups()->removeParticipants($groupId, ['+1234567890']); // 单次最多 8 人
 $client->groups()->approveJoinRequests($groupId, ['join-request-id']);
 $client->groups()->delete($groupId);
+
+// 营销消息：发送 / 数据集 / 模板 / 触达估算 / 分析（/marketing_messages 与 /marketing/*）
+$response = $client->marketing()->send('+1234567890', ['name' => 'promo', 'language' => 'en']);
+$datasetId = $client->marketing()->getDataset()->getDatasetId();
+$estimate = $client->marketing()->getReachEstimate(['geo_locations' => ['countries' => ['BR']]], 'L7D');
 ```
 
 旧的扁平方法（`sendMessage()`、`uploadMedia()`、`setWebhookUrl()` 等）仍然可用，已标注 `@deprecated`，内部一行委托到对应域方法，后续版本才会移除。
@@ -111,6 +116,7 @@ $client->groups()->delete($groupId);
 - ✅ 拉黑用户（查询 / 拉黑 / 解除拉黑）
 - ✅ 主页资料（WhatsApp Business Profile 查询 / 更新）
 - ✅ 群组（建群 / 详情 / 更新 / 删除 / 邀请链接 / 加群请求审批 / 移除成员）
+- ✅ 营销消息（发送 / 转化数据集 / 触达估算 / 模板与分析 / Conversions API 事件）
 - ✅ 健康检查（Cloud API）
 - ✅ 获取媒体文件
 - ✅ 错误处理和重试机制

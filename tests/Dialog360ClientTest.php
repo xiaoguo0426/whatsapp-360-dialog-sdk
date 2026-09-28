@@ -1156,6 +1156,351 @@ class Dialog360ClientTest extends TestCase
         $this->client->groups()->removeParticipants('gid-1', []);
     }
 
+    public function testSendMarketingMessage(): void
+    {
+        $this->mockJsonResponse(200, [
+            'messaging_product' => 'whatsapp',
+            'contacts' => [
+                ['input' => '+1234567890', 'wa_id' => '1234567890', 'user_id' => 'bsuid-123']
+            ],
+            'messages' => [
+                ['id' => 'wamid.marketing-1', 'message_status' => 'accepted']
+            ]
+        ]);
+
+        $response = $this->client->marketing()->send(
+            '+1234567890',
+            [
+                'name' => 'promo_template',
+                'language' => 'en',
+                'components' => [
+                    ['type' => 'body', 'parameters' => [['type' => 'text', 'text' => 'Alice']]]
+                ],
+            ],
+            1.5
+        );
+
+        $this->assertTrue($response->isSuccess());
+        $this->assertEquals('wamid.marketing-1', $response->getMessageId());
+        $this->assertEquals('accepted', $response->getMessageStatus());
+        $this->assertEquals('1234567890', $response->getWaId());
+        $this->assertEquals('bsuid-123', $response->getUserId());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('POST', $request->getMethod());
+        $this->assertEquals('/marketing_messages', $request->getUri()->getPath());
+
+        $payload = $this->getLastRequestPayload();
+        $this->assertEquals('whatsapp', $payload['messaging_product']);
+        $this->assertEquals('template', $payload['type']);
+        $this->assertEquals('+1234567890', $payload['to']);
+        $this->assertEquals('promo_template', $payload['template']['name']);
+        $this->assertEquals(['code' => 'en'], $payload['template']['language']);
+        $this->assertEquals('Alice', $payload['template']['components'][0]['parameters'][0]['text']);
+        $this->assertEquals(1.5, $payload['bid_spec']['per_message_bid_multiplier']);
+    }
+
+    public function testSendMarketingMessageWithBsuidRecipient(): void
+    {
+        $this->mockJsonResponse(200, [
+            'messaging_product' => 'whatsapp',
+            'contacts' => [['input' => 'US.abc123', 'wa_id' => 'US.abc123', 'user_id' => 'US.abc123']],
+            'messages' => [['id' => 'wamid.marketing-2', 'message_status' => 'accepted']]
+        ]);
+
+        $response = $this->client->marketing()->send(
+            '',
+            ['name' => 'promo_template', 'language' => ['code' => 'en']],
+            null,
+            ['recipient' => 'US.abc123', 'product_policy' => 'promotional']
+        );
+
+        $this->assertTrue($response->isSuccess());
+
+        $payload = $this->getLastRequestPayload();
+        $this->assertEquals('US.abc123', $payload['recipient']);
+        $this->assertArrayNotHasKey('to', $payload);
+        $this->assertEquals('promotional', $payload['product_policy']);
+        $this->assertArrayNotHasKey('bid_spec', $payload);
+    }
+
+    public function testSendMarketingMessageFailure(): void
+    {
+        // 4xx（如模板未批准 403）不抛异常，返回 isSuccess=false 的响应对象
+        $this->mockJsonResponse(403, ['error' => 'Template not approved or insufficient permissions']);
+
+        $response = $this->client->marketing()->send(
+            '+1234567890',
+            ['name' => 'unapproved_template', 'language' => 'en']
+        );
+
+        $this->assertFalse($response->isSuccess());
+        $this->assertEquals('Template not approved or insufficient permissions', $response->getErrorMessage());
+        $this->assertEquals('', $response->getMessageId());
+    }
+
+    public function testSendMarketingMessageRequiresTemplateName(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('template.name 不能为空');
+
+        $this->client->marketing()->send('+1234567890', ['language' => 'en']);
+    }
+
+    public function testSendMarketingMessageRequiresLanguage(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('template.language 不能为空');
+
+        $this->client->marketing()->send('+1234567890', ['name' => 'promo_template']);
+    }
+
+    public function testGetMarketingDataset(): void
+    {
+        $this->mockJsonResponse(200, ['id' => 'dataset-1', 'name' => 'My dataset']);
+
+        $dataset = $this->client->marketing()->getDataset();
+
+        $this->assertEquals('dataset-1', $dataset->getDatasetId());
+        $this->assertEquals('My dataset', $dataset->getName());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('GET', $request->getMethod());
+        $this->assertEquals('/marketing/dataset', $request->getUri()->getPath());
+    }
+
+    public function testCreateMarketingDataset(): void
+    {
+        $this->mockJsonResponse(200, ['id' => 'dataset-1', 'name' => 'My dataset']);
+
+        $dataset = $this->client->marketing()->createDataset('My dataset');
+
+        $this->assertEquals('dataset-1', $dataset->getDatasetId());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('POST', $request->getMethod());
+        $this->assertEquals('/marketing/dataset', $request->getUri()->getPath());
+
+        $payload = $this->getLastRequestPayload();
+        $this->assertEquals('My dataset', $payload['name']);
+    }
+
+    public function testGetDatasetForMetaNode(): void
+    {
+        $this->mockJsonResponse(200, ['id' => 'dataset-2', 'name' => 'Page dataset']);
+
+        $dataset = $this->client->marketing()->getDatasetFor('page-123');
+
+        $this->assertEquals('dataset-2', $dataset->getDatasetId());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('GET', $request->getMethod());
+        $this->assertEquals('/marketing/page-123/dataset', $request->getUri()->getPath());
+    }
+
+    public function testCreateDatasetForMetaNode(): void
+    {
+        $this->mockJsonResponse(200, ['id' => 'dataset-2', 'name' => 'Page dataset']);
+
+        $dataset = $this->client->marketing()->createDatasetFor('page-123', 'Page dataset');
+
+        $this->assertEquals('dataset-2', $dataset->getDatasetId());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('POST', $request->getMethod());
+        $this->assertEquals('/marketing/page-123/dataset', $request->getUri()->getPath());
+
+        $payload = $this->getLastRequestPayload();
+        $this->assertEquals('Page dataset', $payload['name']);
+    }
+
+    public function testGetDatasetQuality(): void
+    {
+        $this->mockJsonResponse(200, [
+            'data' => [
+                ['agent_name' => 'default', 'quality' => 'GREEN']
+            ]
+        ]);
+
+        $data = $this->client->marketing()->getDatasetQuality('dataset-1', 'default', ['quality']);
+
+        $this->assertEquals('GREEN', $data['data'][0]['quality']);
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('GET', $request->getMethod());
+        $this->assertEquals('/marketing/dataset_quality', $request->getUri()->getPath());
+        $this->assertStringContainsString('dataset_id=dataset-1', $request->getUri()->getQuery());
+        $this->assertStringContainsString('agent_name=default', $request->getUri()->getQuery());
+        $this->assertStringContainsString('fields=quality', $request->getUri()->getQuery());
+    }
+
+    public function testGetReachEstimate(): void
+    {
+        $this->mockJsonResponse(200, [
+            'estimates' => [
+                [
+                    'bid_amount' => 100,
+                    'deliveries_lower_bound' => 500,
+                    'deliveries_upper_bound' => 900,
+                    'cost_lower_bound' => 10.5,
+                    'cost_upper_bound' => 20.5,
+                    'users' => 1000
+                ]
+            ],
+            'waba_currency' => 'USD'
+        ]);
+
+        $estimate = $this->client->marketing()->getReachEstimate(
+            ['geo_locations' => ['countries' => ['BR']]],
+            'L7D'
+        );
+
+        $this->assertEquals('USD', $estimate->getCurrency());
+        $this->assertCount(1, $estimate->getEstimates());
+        $this->assertEquals(500, $estimate->getEstimates()[0]['deliveries_lower_bound']);
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('GET', $request->getMethod());
+        $this->assertEquals('/marketing/reachestimate', $request->getUri()->getPath());
+
+        $query = $request->getUri()->getQuery();
+        $this->assertStringContainsString('targeting_spec=' . rawurlencode((string) json_encode(['geo_locations' => ['countries' => ['BR']]])), $query);
+        $this->assertStringContainsString('date_interval=L7D', $query);
+    }
+
+    public function testGetReachEstimateRejectsInvalidInterval(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('dateInterval 取值"L3D"不合法');
+
+        $this->client->marketing()->getReachEstimate(['geo_locations' => ['countries' => ['BR']]], 'L3D');
+    }
+
+    public function testListMarketingTemplates(): void
+    {
+        $this->mockJsonResponse(200, [
+            'data' => [
+                ['id' => 'tpl-1', 'name' => 'promo_template'],
+                ['id' => 'tpl-2', 'name' => 'sale_template']
+            ],
+            'paging' => [
+                'cursors' => ['after' => 'cursor-after'],
+                'next' => 'https://waba-v2.360dialog.io/marketing/message_templates?after=cursor-after'
+            ]
+        ]);
+
+        $list = $this->client->marketing()->listTemplates(20);
+
+        $this->assertCount(2, $list->getTemplates());
+        $this->assertEquals('promo_template', $list->getTemplates()[0]['name']);
+        $this->assertEquals('cursor-after', $list->getAfterCursor());
+        $this->assertTrue($list->hasNextPage());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('GET', $request->getMethod());
+        $this->assertEquals('/marketing/message_templates', $request->getUri()->getPath());
+        $this->assertEquals('limit=20', $request->getUri()->getQuery());
+    }
+
+    public function testGetMarketingTemplateById(): void
+    {
+        $this->mockJsonResponse(200, [
+            'id' => 'tpl-1',
+            'name' => 'promo_template',
+            'status' => 'APPROVED'
+        ]);
+
+        $data = $this->client->marketing()->getTemplate('tpl-1');
+
+        $this->assertEquals('APPROVED', $data['status']);
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('GET', $request->getMethod());
+        $this->assertEquals('/marketing/tpl-1', $request->getUri()->getPath());
+    }
+
+    public function testGetTemplateAnalytics(): void
+    {
+        $this->mockJsonResponse(200, [
+            'data' => [
+                ['template_id' => 'tpl-1', 'sent' => 100]
+            ]
+        ]);
+
+        $data = $this->client->marketing()->getTemplateAnalytics(['date_preset' => 'last_7d']);
+
+        $this->assertEquals(100, $data['data'][0]['sent']);
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('GET', $request->getMethod());
+        $this->assertEquals('/marketing/template_analytics', $request->getUri()->getPath());
+        $this->assertStringContainsString('date_preset=last_7d', $request->getUri()->getQuery());
+    }
+
+    public function testEnableTemplateAnalytics(): void
+    {
+        $this->mockJsonResponse(200, ['success' => true]);
+
+        $data = $this->client->marketing()->enableTemplateAnalytics();
+
+        $this->assertTrue($data['success']);
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('POST', $request->getMethod());
+        $this->assertEquals('/marketing/template_analytics', $request->getUri()->getPath());
+        $this->assertStringContainsString('enable=true', $request->getUri()->getQuery());
+    }
+
+    public function testGetInsights(): void
+    {
+        $this->mockJsonResponse(200, [
+            'data' => [
+                ['impressions' => 500, 'clicks' => 25]
+            ]
+        ]);
+
+        $data = $this->client->marketing()->getInsights('ad-object-1', ['fields' => 'impressions,clicks']);
+
+        $this->assertEquals(500, $data['data'][0]['impressions']);
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('GET', $request->getMethod());
+        $this->assertEquals('/marketing/ad-object-1/insights', $request->getUri()->getPath());
+    }
+
+    public function testSendMarketingEvents(): void
+    {
+        $this->mockJsonResponse(200, [
+            'events_received' => 2,
+            'fbtrace_id' => 'trace-1',
+            'messages' => []
+        ]);
+
+        $response = $this->client->marketing()->sendEvents('dataset-1', [
+            ['event_name' => 'Purchase', 'event_time' => 1700000000],
+            ['event_name' => 'Lead', 'event_time' => 1700000100],
+        ]);
+
+        $this->assertEquals(2, $response->getEventsReceived());
+        $this->assertEquals('trace-1', $response->getFbtraceId());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('POST', $request->getMethod());
+        $this->assertEquals('/marketing/dataset-1/events', $request->getUri()->getPath());
+
+        $payload = $this->getLastRequestPayload();
+        $this->assertCount(2, $payload['data']);
+        $this->assertEquals('Purchase', $payload['data'][0]['event_name']);
+    }
+
+    public function testSendMarketingEventsRejectsOverMax(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('单次最多上报 1000 条事件');
+
+        $this->client->marketing()->sendEvents('dataset-1', array_fill(0, 1001, ['event_name' => 'Purchase']));
+    }
+
     public function testGetMediaInfo(): void
     {
         // Cloud API v2 媒体响应结构

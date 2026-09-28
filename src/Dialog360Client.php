@@ -8,6 +8,7 @@ use Dialog360\Api\GroupApi;
 use Dialog360\Api\HealthApi;
 use Dialog360\Api\MediaApi;
 use Dialog360\Api\MessagesApi;
+use Dialog360\Api\MarketingApi;
 use Dialog360\Api\ProfileApi;
 use Dialog360\Api\TemplateApi;
 use Dialog360\Api\WebhookApi;
@@ -37,6 +38,7 @@ use GuzzleHttp\HandlerStack;
  *   $client->blockUsers()->block(['1234567890']);
  *   $client->profile()->get(['about', 'email']);
  *   $client->groups()->create('Group subject');
+ *   $client->marketing()->send('1234567890', ['name' => 'promo', 'language' => 'en']);
  *
  * 旧的扁平方法（sendMessage/uploadMedia/...）保留为向后兼容的一行委托，已标注 @deprecated。
  */
@@ -58,6 +60,7 @@ class Dialog360Client
     private ?BlockUsersApi $blockUsersApi = null;
     private ?ProfileApi $profileApi = null;
     private ?GroupApi $groupApi = null;
+    private ?MarketingApi $marketingApi = null;
 
     public function __construct(
         string        $apiKey,
@@ -162,6 +165,14 @@ class Dialog360Client
     public function groups(): GroupApi
     {
         return $this->groupApi ??= new GroupApi($this->connector);
+    }
+
+    /**
+     * 营销消息 API 域（发送 / 数据集 / 模板 / 触达估算 / 分析，/marketing_messages 与 /marketing/*）
+     */
+    public function marketing(): MarketingApi
+    {
+        return $this->marketingApi ??= new MarketingApi($this->connector);
     }
 
     /** ===== 向后兼容层（@deprecated，委托实现） ===== */
