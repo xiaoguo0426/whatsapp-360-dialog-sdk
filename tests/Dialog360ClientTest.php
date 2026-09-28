@@ -3,6 +3,7 @@
 namespace Dialog360\Tests;
 
 use Dialog360\Dialog360Client;
+use Dialog360\Api\ConversationalComponentsApi;
 use Dialog360\Message\TextMessage;
 use Dialog360\Message\MediaMessage;
 use Dialog360\Message\TemplateMessage;
@@ -20,6 +21,7 @@ use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Psr7\Response;
 use GuzzleHttp\Exception\RequestException;
 use GuzzleHttp\Psr7\Request;
+use Psr\Http\Message\RequestInterface;
 
 class Dialog360ClientTest extends TestCase
 {
@@ -489,6 +491,83 @@ class Dialog360ClientTest extends TestCase
         $this->assertCount(2, $health['health_status']['entities']);
     }
 
+    public function testGetConversationalAutomation(): void
+    {
+        $this->mockJsonResponse(200, [
+            'id' => '106540352242922',
+            'conversational_automation' => [
+                'commands' => [
+                    [
+                        'command_name' => 'support',
+                        'command_description' => 'Contact customer support'
+                    ]
+                ],
+                'enable_welcome_message' => true,
+                'prompts' => ['How can we help you today?'],
+                'id' => 'conversational-automation-id'
+            ]
+        ]);
+
+        $automation = $this->client->conversationalComponents()->get();
+
+        $this->assertEquals('106540352242922', $automation->getPhoneNumberId());
+        $this->assertTrue($automation->getEnableWelcomeMessage());
+        $this->assertEquals(['How can we help you today?'], $automation->getPrompts());
+        $commands = $automation->getCommands();
+        $this->assertCount(1, $commands);
+        $this->assertEquals('support', $commands[0]['command_name']);
+        $this->assertEquals('Contact customer support', $commands[0]['command_description']);
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('GET', $request->getMethod());
+        $this->assertEquals('/conversational_automation', $request->getUri()->getPath());
+    }
+
+    public function testConfigureConversationalAutomation(): void
+    {
+        $this->mockJsonResponse(200, ['success' => true]);
+
+        $response = $this->client->conversationalComponents()->configure(
+            [ConversationalComponentsApi::command('support', '联系客服')],
+            true,
+            ['您好，请问有什么可以帮您？']
+        );
+
+        $this->assertTrue($response->isSuccess());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('POST', $request->getMethod());
+        $this->assertEquals('/conversational_automation', $request->getUri()->getPath());
+
+        $payload = $this->getLastRequestPayload();
+        $this->assertEquals('support', $payload['commands'][0]['command_name']);
+        $this->assertEquals('联系客服', $payload['commands'][0]['command_description']);
+        $this->assertTrue($payload['enable_welcome_message']);
+        $this->assertEquals(['您好，请问有什么可以帮您？'], $payload['prompts']);
+    }
+
+    public function testConfigureConversationalAutomationRejectsEmptyCommandName(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('command_name 不能为空');
+
+        $this->client->conversationalComponents()->configure(
+            [['command_name' => '  ', 'command_description' => 'Contact support']]
+        );
+    }
+
+    public function testConfigureConversationalAutomationRejectsInvalidPrompt(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('prompts[1] 必须为非空字符串');
+
+        $this->client->conversationalComponents()->configure(
+            [ConversationalComponentsApi::command('support', '联系客服')],
+            false,
+            ['合法提示语', '   ']
+        );
+    }
+
     public function testGetMediaInfo(): void
     {
         // Cloud API v2 媒体响应结构
@@ -598,6 +677,27 @@ class Dialog360ClientTest extends TestCase
                 ]
             ]))
         );
+    }
+
+    /**
+     * 模拟指定状态的 JSON 响应
+     */
+    private function mockJsonResponse(int $status, array $body): void
+    {
+        $this->mockHandler->append(new Response($status, [], (string) json_encode($body)));
+    }
+
+    /**
+     * 获取最后一次请求（MockHandler 返回值可能为 null，此处断言失败以收窄类型）
+     */
+    private function getLastCapturedRequest(): RequestInterface
+    {
+        $request = $this->mockHandler->getLastRequest();
+        if ($request === null) {
+            self::fail('未捕获到任何请求');
+        }
+
+        return $request;
     }
 
     /**

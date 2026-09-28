@@ -70,6 +70,14 @@ $templates = $client->templates()->list();
 
 // 健康状态
 $health = $client->health()->status();
+
+// Conversational Components：会话自动化（欢迎消息 / 命令 / 提示语，/conversational_automation）
+$automation = $client->conversationalComponents()->get();
+$response = $client->conversationalComponents()->configure(
+    [ConversationalComponentsApi::command('support', '联系人工客服')], // commands
+    true,                                                              // enable_welcome_message
+    ['您好！请问需要什么帮助？']                                          // prompts
+);
 ```
 
 旧的扁平方法（`sendMessage()`、`uploadMedia()`、`setWebhookUrl()` 等）仍然可用，已标注 `@deprecated`，内部一行委托到对应域方法，后续版本才会移除。
@@ -82,6 +90,7 @@ $health = $client->health()->status();
 - ✅ 发送媒体消息（图片、音频、视频、文档）
 - ✅ 发送模板消息
 - ✅ 发送交互式消息（按钮、列表）
+- ✅ Conversational Components（会话自动化：欢迎消息 / 命令 / 提示语）
 - ✅ 健康检查（Cloud API）
 - ✅ 获取媒体文件
 - ✅ 错误处理和重试机制

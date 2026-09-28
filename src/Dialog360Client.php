@@ -2,6 +2,7 @@
 
 namespace Dialog360;
 
+use Dialog360\Api\ConversationalComponentsApi;
 use Dialog360\Api\HealthApi;
 use Dialog360\Api\MediaApi;
 use Dialog360\Api\MessagesApi;
@@ -29,6 +30,7 @@ use GuzzleHttp\HandlerStack;
  *   $client->webhook()->setUrl('https://...');
  *   $client->templates()->list();
  *   $client->health()->status();
+ *   $client->conversationalComponents()->get();
  *
  * 旧的扁平方法（sendMessage/uploadMedia/...）保留为向后兼容的一行委托，已标注 @deprecated。
  */
@@ -46,6 +48,7 @@ class Dialog360Client
     private ?WebhookApi $webhookApi = null;
     private ?TemplateApi $templateApi = null;
     private ?HealthApi $healthApi = null;
+    private ?ConversationalComponentsApi $conversationalComponentsApi = null;
 
     public function __construct(
         string        $apiKey,
@@ -118,6 +121,14 @@ class Dialog360Client
     public function health(): HealthApi
     {
         return $this->healthApi ??= new HealthApi($this->connector);
+    }
+
+    /**
+     * Conversational Components API 域（欢迎消息 / 命令 / 提示语，/conversational_automation）
+     */
+    public function conversationalComponents(): ConversationalComponentsApi
+    {
+        return $this->conversationalComponentsApi ??= new ConversationalComponentsApi($this->connector);
     }
 
     /** ===== 向后兼容层（@deprecated，委托实现） ===== */
