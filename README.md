@@ -78,6 +78,11 @@ $response = $client->conversationalComponents()->configure(
     true,                                                              // enable_welcome_message
     ['您好！请问需要什么帮助？']                                          // prompts
 );
+
+// 拉黑用户：查询 / 拉黑 / 解除拉黑（/block_users）
+$list = $client->blockUsers()->list(limit: 10);
+$response = $client->blockUsers()->block(['+1234567890']);
+$response = $client->blockUsers()->unblock(['+1234567890']);
 ```
 
 旧的扁平方法（`sendMessage()`、`uploadMedia()`、`setWebhookUrl()` 等）仍然可用，已标注 `@deprecated`，内部一行委托到对应域方法，后续版本才会移除。
@@ -91,6 +96,7 @@ $response = $client->conversationalComponents()->configure(
 - ✅ 发送模板消息
 - ✅ 发送交互式消息（按钮、列表）
 - ✅ Conversational Components（会话自动化：欢迎消息 / 命令 / 提示语）
+- ✅ 拉黑用户（查询 / 拉黑 / 解除拉黑）
 - ✅ 健康检查（Cloud API）
 - ✅ 获取媒体文件
 - ✅ 错误处理和重试机制

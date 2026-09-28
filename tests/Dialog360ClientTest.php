@@ -568,6 +568,152 @@ class Dialog360ClientTest extends TestCase
         );
     }
 
+    public function testBlockUsers(): void
+    {
+        $this->mockJsonResponse(200, [
+            'messaging_product' => 'whatsapp',
+            'block_users' => [
+                'added_users' => [
+                    ['input' => '+1234567890', 'wa_id' => '1234567890']
+                ],
+                'failed_users' => []
+            ]
+        ]);
+
+        $response = $this->client->blockUsers()->block(['+1234567890']);
+
+        $this->assertTrue($response->isSuccess());
+        $this->assertNull($response->getError());
+        $this->assertEquals('whatsapp', $response->getMessagingProduct());
+        $added = $response->getAddedUsers();
+        $this->assertCount(1, $added);
+        $this->assertEquals('1234567890', $added[0]['wa_id']);
+        $this->assertSame([], $response->getFailedUsers());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('POST', $request->getMethod());
+        $this->assertEquals('/block_users', $request->getUri()->getPath());
+
+        $payload = $this->getLastRequestPayload();
+        $this->assertEquals('whatsapp', $payload['messaging_product']);
+        $this->assertEquals('+1234567890', $payload['block_users'][0]['user']);
+    }
+
+    public function testBlockUsersMixedFailure(): void
+    {
+        // 400"混合成功/失败"：不抛异常，返回携带部分结果与 error 的响应对象
+        $this->mockJsonResponse(400, [
+            'messaging_product' => 'whatsapp',
+            'block_users' => [
+                'added_users' => [
+                    ['input' => '+1234567890', 'wa_id' => '1234567890']
+                ],
+                'failed_users' => [
+                    [
+                        'input' => 'invalid-number',
+                        'errors' => [
+                            ['code' => 131000, 'message' => 'Something went wrong']
+                        ]
+                    ]
+                ]
+            ],
+            'error' => [
+                'code' => 131000,
+                'message' => 'Mixed success/failure',
+                'type' => 'OAuthException'
+            ]
+        ]);
+
+        $response = $this->client->blockUsers()->block(['+1234567890', 'invalid-number']);
+
+        $this->assertFalse($response->isSuccess());
+        $this->assertNotNull($response->getError());
+        $this->assertEquals('Mixed success/failure', $response->getError()['message']);
+        $this->assertCount(1, $response->getAddedUsers());
+        $this->assertCount(1, $response->getFailedUsers());
+    }
+
+    public function testUnblockUsers(): void
+    {
+        $this->mockJsonResponse(200, [
+            'messaging_product' => 'whatsapp',
+            'block_users' => [
+                'added_users' => [
+                    ['input' => '+1234567890', 'wa_id' => '1234567890']
+                ],
+                'failed_users' => []
+            ]
+        ]);
+
+        $response = $this->client->blockUsers()->unblock(['+1234567890']);
+
+        $this->assertTrue($response->isSuccess());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('DELETE', $request->getMethod());
+        $this->assertEquals('/block_users', $request->getUri()->getPath());
+
+        $payload = $this->getLastRequestPayload();
+        $this->assertEquals('+1234567890', $payload['block_users'][0]['user']);
+    }
+
+    public function testListBlockedUsers(): void
+    {
+        $this->mockJsonResponse(200, [
+            'data' => [
+                [
+                    'block_users' => [
+                        ['input' => '+1234567890', 'wa_id' => '1234567890'],
+                        ['input' => '+9876543210', 'wa_id' => '9876543210']
+                    ]
+                ]
+            ],
+            'paging' => [
+                'cursors' => [
+                    'after' => 'cursor-after',
+                    'before' => 'cursor-before'
+                ],
+                'next' => 'https://waba-v2.360dialog.io/block_users?after=cursor-after'
+            ]
+        ]);
+
+        $list = $this->client->blockUsers()->list(10);
+
+        $this->assertCount(2, $list->getUsers());
+        $this->assertEquals('1234567890', $list->getUsers()[0]['wa_id']);
+        $this->assertEquals('cursor-after', $list->getAfterCursor());
+        $this->assertEquals('cursor-before', $list->getBeforeCursor());
+        $this->assertTrue($list->hasNextPage());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('GET', $request->getMethod());
+        $this->assertEquals('/block_users', $request->getUri()->getPath());
+        $this->assertStringContainsString('limit=10', $request->getUri()->getQuery());
+    }
+
+    public function testListBlockedUsersWithoutPaging(): void
+    {
+        $this->mockJsonResponse(200, [
+            'data' => [
+                ['block_users' => []]
+            ]
+        ]);
+
+        $list = $this->client->blockUsers()->list();
+
+        $this->assertSame([], $list->getUsers());
+        $this->assertNull($list->getAfterCursor());
+        $this->assertFalse($list->hasNextPage());
+    }
+
+    public function testBlockUsersRejectsEmptyUser(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('users[1] 必须为非空的用户号码');
+
+        $this->client->blockUsers()->block(['+1234567890', '   ']);
+    }
+
     public function testGetMediaInfo(): void
     {
         // Cloud API v2 媒体响应结构

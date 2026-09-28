@@ -2,6 +2,7 @@
 
 namespace Dialog360;
 
+use Dialog360\Api\BlockUsersApi;
 use Dialog360\Api\ConversationalComponentsApi;
 use Dialog360\Api\HealthApi;
 use Dialog360\Api\MediaApi;
@@ -31,6 +32,7 @@ use GuzzleHttp\HandlerStack;
  *   $client->templates()->list();
  *   $client->health()->status();
  *   $client->conversationalComponents()->get();
+ *   $client->blockUsers()->block(['1234567890']);
  *
  * 旧的扁平方法（sendMessage/uploadMedia/...）保留为向后兼容的一行委托，已标注 @deprecated。
  */
@@ -49,6 +51,7 @@ class Dialog360Client
     private ?TemplateApi $templateApi = null;
     private ?HealthApi $healthApi = null;
     private ?ConversationalComponentsApi $conversationalComponentsApi = null;
+    private ?BlockUsersApi $blockUsersApi = null;
 
     public function __construct(
         string        $apiKey,
@@ -129,6 +132,14 @@ class Dialog360Client
     public function conversationalComponents(): ConversationalComponentsApi
     {
         return $this->conversationalComponentsApi ??= new ConversationalComponentsApi($this->connector);
+    }
+
+    /**
+     * 拉黑用户 API 域（查询 / 拉黑 / 解除拉黑，/block_users）
+     */
+    public function blockUsers(): BlockUsersApi
+    {
+        return $this->blockUsersApi ??= new BlockUsersApi($this->connector);
     }
 
     /** ===== 向后兼容层（@deprecated，委托实现） ===== */
