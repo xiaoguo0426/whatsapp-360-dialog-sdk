@@ -21,8 +21,20 @@ class ApiConnector
 {
     public function __construct(
         private Client $httpClient,
-        private int $retryAttempts
+        private int $retryAttempts,
+        private string $baseUri = ''
     ) {
+    }
+
+    /**
+     * 拼接为绝对 URI。
+     *
+     * 路径首段含冒号时（如 /upload:{session-id}），Guzzle 的相对 URI 解析会把它
+     * 当作 host:port 而报 MalformedUriException，绝对 URI（带 scheme+host）则能正常解析。
+     */
+    public function absoluteUri(string $path): string
+    {
+        return $this->baseUri . $path;
     }
 
     /**

@@ -90,7 +90,7 @@ class Dialog360Client
             $clientOptions['handler'] = $handlerStack;
         }
 
-        $this->connector = new ApiConnector(new Client($clientOptions), $this->retryAttempts);
+        $this->connector = new ApiConnector(new Client($clientOptions), $this->retryAttempts, $this->baseUrl);
     }
 
     /** ===== 域访问器（新用法入口） ===== */
@@ -104,7 +104,7 @@ class Dialog360Client
     }
 
     /**
-     * 媒体 API 域（上传/查询/下载/删除媒体文件）
+     * 媒体 API 域（上传 / 分块续传 / 查询 / 下载 / 删除媒体文件）
      */
     public function media(): MediaApi
     {

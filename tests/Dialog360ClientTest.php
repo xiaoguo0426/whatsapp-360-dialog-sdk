@@ -1820,6 +1820,181 @@ class Dialog360ClientTest extends TestCase
         $this->assertTrue($media->isImage());
     }
 
+    public function testCreateUploadSession(): void
+    {
+        $this->mockJsonResponse(200, ['id' => '1234567890']);
+
+        $session = $this->client->media()->createUploadSession('large.mp4', 123456, 'video/mp4');
+
+        $this->assertEquals('1234567890', $session->getSessionId());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('POST', $request->getMethod());
+        $this->assertEquals('/uploads', $request->getUri()->getPath());
+
+        $query = $request->getUri()->getQuery();
+        $this->assertStringContainsString('file_name=large.mp4', $query);
+        $this->assertStringContainsString('file_length=123456', $query);
+        $this->assertStringContainsString('file_type=video%2Fmp4', $query);
+    }
+
+    public function testCreateUploadSessionWithoutMimeType(): void
+    {
+        $this->mockJsonResponse(200, ['id' => 'upload:1']);
+
+        $this->client->media()->createUploadSession('file.jpg', 10);
+
+        $query = $this->getLastCapturedRequest()->getUri()->getQuery();
+        $this->assertStringNotContainsString('file_type', $query);
+    }
+
+    public function testCreateUploadSessionRejectsNonPositiveLength(): void
+    {
+        $this->expectException(Dialog360Exception::class);
+        $this->expectExceptionMessage('文件长度必须大于 0');
+
+        $this->client->media()->createUploadSession('file.jpg', 0);
+    }
+
+    public function testGetUploadSessionStatus(): void
+    {
+        $this->mockJsonResponse(200, ['id' => '1234567890', 'file_offset' => 8192]);
+
+        $status = $this->client->media()->getUploadSessionStatus('1234567890');
+
+        $this->assertTrue($status->isSuccess());
+        $this->assertEquals(8192, $status->getFileOffset());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('GET', $request->getMethod());
+        $this->assertEquals('/upload:1234567890', $request->getUri()->getPath());
+    }
+
+    public function testUploadChunkSendsBinaryWithOffsetHeader(): void
+    {
+        $this->mockJsonResponse(200, ['h' => 'handle-abc', 'success' => true]);
+
+        $response = $this->client->media()->uploadChunk('sess-1', 'chunk-data', 4096);
+
+        $this->assertEquals('handle-abc', $response->getHandle());
+        $this->assertTrue($response->isSuccess());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('POST', $request->getMethod());
+        $this->assertEquals('/upload:sess-1', $request->getUri()->getPath());
+        $this->assertEquals('4096', $request->getHeaderLine('file_offset'));
+        $this->assertEquals('application/octet-stream', $request->getHeaderLine('Content-Type'));
+        $this->assertEquals('chunk-data', $request->getBody()->getContents());
+    }
+
+    public function testUploadWithSessionUsesPrefixedSessionIdPath(): void
+    {
+        $this->mockJsonResponse(200, ['h' => 'handle-xyz']);
+
+        $response = $this->client->media()->uploadWithSession('upload:99', 'binary-content');
+
+        $this->assertEquals('handle-xyz', $response->getHandle());
+        $this->assertTrue($response->isSuccess());
+
+        $request = $this->getLastCapturedRequest();
+        $this->assertEquals('/upload:99', $request->getUri()->getPath());
+        $this->assertEquals('0', $request->getHeaderLine('file_offset'));
+    }
+
+    public function testUploadResumableSplitsFileIntoChunks(): void
+    {
+        $filePath = $this->makeTempFile(str_repeat('a', 8192) . str_repeat('b', 1808));
+
+        try {
+            // 新建会话响应（无 file_offset 即从 0 开始）+ 两个分块响应
+            $this->mockJsonResponse(200, ['id' => 'sess-resume']);
+            $this->mockJsonResponse(200, ['success' => true]);
+            $this->mockJsonResponse(200, ['h' => 'final-handle', 'success' => true]);
+
+            $handle = $this->client->media()->uploadResumable($filePath, 'image/jpeg', 8192);
+
+            $this->assertEquals('final-handle', $handle->getHandle());
+
+            $request = $this->getLastCapturedRequest();
+            $this->assertEquals('/upload:sess-resume', $request->getUri()->getPath());
+            $this->assertEquals('8192', $request->getHeaderLine('file_offset'));
+            $this->assertEquals(str_repeat('b', 1808), $request->getBody()->getContents());
+        } finally {
+            @unlink($filePath);
+        }
+    }
+
+    public function testUploadResumableResumesFromServerOffset(): void
+    {
+        $filePath = $this->makeTempFile(str_repeat('a', 8192) . str_repeat('b', 1808));
+
+        try {
+            // 传入已有会话ID：先查状态（已收 8192 字节），再续传剩余部分
+            $this->mockJsonResponse(200, ['id' => 'sess-resume', 'file_offset' => 8192]);
+            $this->mockJsonResponse(200, ['h' => 'resumed-handle', 'success' => true]);
+
+            $handle = $this->client->media()->uploadResumable($filePath, 'image/jpeg', 8192, 'sess-resume');
+
+            $this->assertEquals('resumed-handle', $handle->getHandle());
+
+            $request = $this->getLastCapturedRequest();
+            $this->assertEquals('POST', $request->getMethod());
+            $this->assertEquals('8192', $request->getHeaderLine('file_offset'));
+            $this->assertEquals(str_repeat('b', 1808), $request->getBody()->getContents());
+        } finally {
+            @unlink($filePath);
+        }
+    }
+
+    public function testUploadResumableRejectsChunkSizeNotMultipleOf8KB(): void
+    {
+        $filePath = $this->makeTempFile('data');
+
+        try {
+            $this->expectException(Dialog360Exception::class);
+            $this->expectExceptionMessage('分块大小必须为 8KB（8192 字节）的整数倍');
+
+            $this->client->media()->uploadResumable($filePath, 'image/jpeg', 1000);
+        } finally {
+            @unlink($filePath);
+        }
+    }
+
+    public function testUploadResumableRejectsMissingFile(): void
+    {
+        $this->expectException(Dialog360Exception::class);
+        $this->expectExceptionMessage('文件不存在');
+
+        $this->client->media()->uploadResumable('/tmp/definitely-not-here.jpg', 'image/jpeg');
+    }
+
+    public function testUploadResumableRejectsServerOffsetBeyondFileSize(): void
+    {
+        $filePath = $this->makeTempFile('tiny');
+
+        try {
+            $this->mockJsonResponse(200, ['id' => 'sess-1', 'file_offset' => 999999]);
+
+            $this->expectException(Dialog360Exception::class);
+            $this->expectExceptionMessage('超过本地文件大小');
+
+            $this->client->media()->uploadResumable($filePath, 'image/jpeg', 8192, 'sess-1');
+        } finally {
+            @unlink($filePath);
+        }
+    }
+
+    /**
+     * 创建临时文件用于上传测试
+     */
+    private function makeTempFile(string $contents): string
+    {
+        $path = tempnam(sys_get_temp_dir(), 'd360-media-') . '.jpg';
+        file_put_contents($path, $contents);
+
+        return $path;
+    }
+
     public function testNetworkError(): void
     {
         // 网络错误（无响应）属于暂时性错误，会触发客户端重试；测试中使用 1 次重试上限以快速验证
