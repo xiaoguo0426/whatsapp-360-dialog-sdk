@@ -5,15 +5,32 @@ namespace Dialog360\Api;
 use Dialog360\Exception\Dialog360ClientError;
 use Dialog360\Exception\Dialog360Exception;
 use Dialog360\Http\ApiConnector;
+use Dialog360\Response\MediaHandleResponse;
 use Dialog360\Response\MediaResponse;
+use Dialog360\Response\UploadSessionResponse;
+use Dialog360\Response\UploadSessionStatusResponse;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Exception\RequestException;
 
 /**
  * 媒体 API 域：POST /media、GET|DELETE /{media-id}
+ *
+ * 另含分块续传上传（Resumable Upload，Meta Upload API 的 360dialog 代理）：
+ * - POST /uploads：创建上传会话
+ * - GET /upload:{session-id}：查询会话已接收偏移（断点续传）
+ * - POST /upload:{session-id}：按 file_offset 上传分块
+ * - POST /{session-id}：一步式上传（upload: 前缀会话ID）
+ *
+ * 续传上传完最后一个分块后返回 handle（h），目前主要用于更新头像等资料。
+ *
+ * @see https://docs.360dialog.com/docs/messaging/media/upload-retrieve-or-delete-media
+ * @see https://docs.360dialog.com/docs/messaging-api/api-reference/media-uploads
  */
 readonly class MediaApi
 {
+    /** 分块续传默认分块大小（4MB，须为 8KB 的整数倍） */
+    public const DEFAULT_CHUNK_SIZE = 4 * 1024 * 1024;
+
     public function __construct(private ApiConnector $connector)
     {
     }
@@ -124,6 +141,191 @@ readonly class MediaApi
     {
         $this->connector->request('DELETE', "/{$mediaId}", [], '删除媒体文件');
         return true;
+    }
+
+    /**
+     * 创建分块续传上传会话（Cloud API: POST /uploads）
+     *
+     * @param string $fileName 文件名（含扩展名）
+     * @param int $fileLength 文件总字节数
+     * @param string $mimeType MIME类型，如 image/jpeg
+     * @return UploadSessionResponse 含会话ID与初始 file_offset
+     * @throws Dialog360ClientError
+     * @throws Dialog360Exception
+     */
+    public function createUploadSession(string $fileName, int $fileLength, string $mimeType = ''): UploadSessionResponse
+    {
+        if ($fileLength <= 0) {
+            throw new Dialog360Exception('文件长度必须大于 0');
+        }
+
+        $query = array_filter([
+            'file_name' => $fileName,
+            'file_length' => (string) $fileLength,
+            'file_type' => $mimeType !== '' ? $mimeType : null,
+        ], static fn ($value) => $value !== null);
+
+        $data = $this->connector->request('POST', '/uploads?' . http_build_query($query), [], '创建上传会话');
+
+        if (!isset($data['id']) || !is_string($data['id']) || $data['id'] === '') {
+            throw new Dialog360Exception('创建上传会话响应中缺少会话ID');
+        }
+
+        return new UploadSessionResponse($data);
+    }
+
+    /**
+     * 查询上传会话状态（Cloud API: GET /upload:{session-id}）
+     *
+     * 返回的 file_offset 即服务端已接收的字节数，断点续传时从该偏移继续上传。
+     *
+     * @param string $sessionId createUploadSession() 返回的会话ID
+     * @throws Dialog360ClientError
+     * @throws Dialog360Exception
+     */
+    public function getUploadSessionStatus(string $sessionId): UploadSessionStatusResponse
+    {
+        $data = $this->connector->get($this->sessionUri($sessionId), [], '查询上传会话状态');
+        return new UploadSessionStatusResponse($data);
+    }
+
+    /**
+     * 上传一个分块（Cloud API: POST /upload:{session-id}）
+     *
+     * @param string $sessionId 上传会话ID
+     * @param string $chunk 分块内容，整体上传时须为完整文件内容
+     * @param int $offset 本分块起点的字节偏移（服务端已接收位置）
+     * @return MediaHandleResponse 上传完最后一个分块后 getHandle() 返回文件句柄
+     * @throws Dialog360ClientError
+     * @throws Dialog360Exception
+     */
+    public function uploadChunk(string $sessionId, string $chunk, int $offset = 0): MediaHandleResponse
+    {
+        if ($offset < 0) {
+            throw new Dialog360Exception('分块偏移不能为负数');
+        }
+
+        $data = $this->connector->request('POST', $this->sessionUri($sessionId), [
+            'headers' => [
+                'file_offset' => (string) $offset,
+                'Content-Type' => 'application/octet-stream',
+            ],
+            'body' => $chunk,
+        ], '上传媒体分块');
+
+        return new MediaHandleResponse($data);
+    }
+
+    /**
+     * 一步式上传媒体（Cloud API: POST /{session-id}，会话ID带 upload: 前缀）
+     *
+     * 请求体直接携带完整文件内容，适合中小文件；返回的 handle 可用于更新头像等资料。
+     *
+     * @param string $sessionId 上传会话ID（如 upload:1234567890）
+     * @param string $contents 完整文件内容
+     * @param int $offset 本请求数据起点的字节偏移，默认 0
+     * @throws Dialog360ClientError
+     * @throws Dialog360Exception
+     */
+    public function uploadWithSession(string $sessionId, string $contents, int $offset = 0): MediaHandleResponse
+    {
+        if ($offset < 0) {
+            throw new Dialog360Exception('分块偏移不能为负数');
+        }
+
+        $data = $this->connector->request('POST', $this->connector->absoluteUri("/{$sessionId}"), [
+            'headers' => [
+                'file_offset' => (string) $offset,
+                'Content-Type' => 'application/octet-stream',
+            ],
+            'body' => $contents,
+        ], '上传媒体文件（会话模式）');
+
+        return new MediaHandleResponse($data);
+    }
+
+    /**
+     * 分块续传上传本地文件的便捷方法
+     *
+     * 自动完成 创建会话 → 逐块上传 → 返回 handle。
+     * 中断后可用 getUploadSessionStatus($sessionId) 取回偏移，再自行从该偏移续传。
+     *
+     * @param string $filePath 本地文件路径
+     * @param string $mimeType MIME类型，如 image/jpeg
+     * @param int $chunkSize 分块字节数，须为 8KB（8192）的整数倍
+     * @param string|null $sessionId 已有会话ID（断点续传），为 null 时新建会话
+     * @return MediaHandleResponse 最后一个分块响应，含文件句柄 handle
+     * @throws Dialog360ClientError
+     * @throws Dialog360Exception
+     */
+    public function uploadResumable(
+        string $filePath,
+        string $mimeType,
+        int    $chunkSize = self::DEFAULT_CHUNK_SIZE,
+        ?string $sessionId = null
+    ): MediaHandleResponse
+    {
+        if (!file_exists($filePath)) {
+            throw new Dialog360Exception('文件不存在: ' . $filePath);
+        }
+        if ($chunkSize <= 0 || $chunkSize % 8192 !== 0) {
+            throw new Dialog360Exception('分块大小必须为 8KB（8192 字节）的整数倍');
+        }
+
+        $this->validateMediaFile($filePath, $mimeType);
+
+        $fileSize = (int) filesize($filePath);
+
+        $offset = 0;
+        if ($sessionId === null) {
+            $session = $this->createUploadSession(basename($filePath), $fileSize, $mimeType);
+            $sessionId = $session->getSessionId();
+            $offset = $session->getFileOffset();
+        } else {
+            $offset = $this->getUploadSessionStatus($sessionId)->getFileOffset();
+        }
+
+        if ($offset > $fileSize) {
+            throw new Dialog360Exception("服务端偏移 {$offset} 超过本地文件大小 {$fileSize}，文件与会话不匹配");
+        }
+
+        $handle = null;
+        $stream = fopen($filePath, 'rb');
+        if ($stream === false) {
+            throw new Dialog360Exception('无法读取文件: ' . $filePath);
+        }
+
+        try {
+            fseek($stream, $offset);
+            while (!feof($stream)) {
+                $chunk = fread($stream, $chunkSize);
+                if ($chunk === false || $chunk === '') {
+                    break;
+                }
+
+                $handle = $this->uploadChunk($sessionId, $chunk, $offset);
+                $offset += strlen($chunk);
+            }
+        } finally {
+            fclose($stream);
+        }
+
+        if ($handle === null) {
+            // 偏移已达文件末尾（会话可能已完成），返回当前状态
+            return new MediaHandleResponse(['success' => $this->getUploadSessionStatus($sessionId)->isSuccess()]);
+        }
+
+        return $handle;
+    }
+
+    /**
+     * 会话端点 URI：GET|POST /upload:{session-id}
+     *
+     * 必须拼成绝对 URI：路径首段的冒号会被 Guzzle 当作 host:port 解析而报错。
+     */
+    private function sessionUri(string $sessionId): string
+    {
+        return $this->connector->absoluteUri('/upload:' . $sessionId);
     }
 
     /**

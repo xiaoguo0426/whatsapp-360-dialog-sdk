@@ -57,6 +57,12 @@ $mediaInfo = $client->media()->getInfo($mediaId);
 $content = $client->media()->download($mediaId, '/tmp/image.jpg'); // 可选保存到本地
 $client->media()->delete($mediaId);
 
+// 媒体：分块续传上传（Resumable Upload，适合大文件/弱网，返回 handle）
+$handle = $client->media()->uploadResumable('/path/to/large.mp4', 'video/mp4');
+$session = $client->media()->createUploadSession('large.mp4', filesize('/path/to/large.mp4'), 'video/mp4');
+$status = $client->media()->getUploadSessionStatus($session->getSessionId()); // 断点续传：查已收偏移
+$client->media()->uploadChunk($session->getSessionId(), $chunk, $status->getFileOffset()); // 逐块上传
+
 // Webhook：电话号码级
 $client->webhook()->setUrl('https://example.com/webhook');
 $webhook = $client->webhook()->getUrl();
@@ -128,7 +134,7 @@ $estimate = $client->marketing()->getReachEstimate(['geo_locations' => ['countri
 - ✅ 营销消息（发送 / 转化数据集 / 触达估算 / 模板与分析 / Conversions API 事件）
 - ✅ 模板管理（列表 / 模板库 / 创建 / 编辑 / 删除 / 归档恢复 / 效果对比）
 - ✅ 健康检查（Cloud API）
-- ✅ 获取媒体文件
+- ✅ 媒体文件（上传 / 查询 / 下载 / 删除 / 分块续传上传）
 - ✅ 错误处理和重试机制
 - ✅ 完整的类型提示
 - ✅ 单元测试覆盖
@@ -305,15 +311,44 @@ $health = $client->getHealthStatus();
 echo $health['health_status']['can_send_message'] ?? 'UNKNOWN';
 ```
 
-## 获取媒体文件
+## 媒体文件（Cloud API）
+
+上传 / 查询 / 下载 / 删除（媒体存储 30 天，上传限速 25 次/秒/号码）：
 
 ```php
-use Dialog360\Media;
+$mediaId = $client->media()->upload('/path/to/file.jpg', 'image/jpeg');
 
-$media = $client->getMedia('media-id');
-$fileContent = $media->getContent();
-$fileInfo = $media->getInfo();
+$info = $client->media()->getInfo($mediaId);   // GET /{media-id}：url / mime_type / sha256 / file_size
+$content = $client->media()->download($mediaId, '/tmp/file.jpg'); // 下载，可选落盘
+$client->media()->downloadByUrl($info->getUrl(), '/tmp/file.jpg'); // 用下载URL直接落盘
+
+$client->media()->delete($mediaId);            // DELETE /{media-id}
 ```
+
+### 分块续传上传（Resumable Upload）
+
+大文件或弱网场景使用 `POST /uploads` + `POST /upload:{session-id}`，中断后可按服务端偏移续传。
+上传完成后返回文件句柄 `handle`（目前主要用于更新头像等资料；普通媒体消息仍建议用 `upload()` 取 media_id）。
+
+```php
+use Dialog360\Api\MediaApi;
+
+// 一步式：自动 创建会话 → 逐块上传 → 返回 handle
+$handle = $client->media()->uploadResumable('/path/to/large.mp4', 'video/mp4');
+echo $handle->getHandle();
+
+// 手动控制会话
+$session = $client->media()->createUploadSession('large.mp4', filesize('/path/to/large.mp4'), 'video/mp4');
+$sessionId = $session->getSessionId();
+
+$status = $client->media()->getUploadSessionStatus($sessionId); // GET /upload:{session-id}
+$response = $client->media()->uploadChunk($sessionId, $chunk, $status->getFileOffset());
+
+// 或直接带 upload: 前缀的会话ID一步上传
+$response = $client->media()->uploadWithSession('upload:' . $sessionId, file_get_contents('/path/to/file.jpg'));
+```
+
+> 分块大小必须为 8KB（8192 字节）的整数倍，默认 `MediaApi::DEFAULT_CHUNK_SIZE`（4MB）。
 
 ## 错误处理
 
